@@ -342,6 +342,19 @@ Overall quality score (1-10) with brief justification.
 """
 
 
+NFR_FOLLOW_UP_PROMPT = """You are an expert Non-Functional Requirements (NFR) assistant helping a user interrogate an existing NFR pack or validation report.
+
+## Rules:
+- Use only the supplied context and conversation history as evidence
+- Do not invent NFRs, system details, compliance obligations, or decisions that are not supported by the context
+- If the user asks something the context does not answer, say what is missing and what clarification would help
+- Reference NFR IDs, report sections, or framework names from the material where helpful
+- Be concise, practical, and decision-oriented
+- If asked to rewrite or improve an NFR, clearly label the rewrite as a suggestion
+- Always return valid markdown
+"""
+
+
 # â”€â”€ Shared API call helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _normalise_usage(usage: Any) -> dict[str, int]:
@@ -495,4 +508,32 @@ def validate_nfrs(system_description: str, existing_nfrs: str) -> AgentRunResult
 ## Existing NFRs
 {existing_nfrs}
 """
+    )
+
+
+def answer_nfr_question(
+    context: str,
+    question: str,
+    history: list[dict[str, str]] | None = None,
+) -> AgentRunResult:
+    """Answer follow-up questions grounded in the current NFR run context."""
+    conversation = ""
+    if history:
+        recent_messages = history[-6:]
+        lines = [
+            f"{item['role'].title()}: {item['content']}"
+            for item in recent_messages
+        ]
+        conversation = "\n\n## Recent Conversation\n" + "\n\n".join(lines)
+
+    return _call_openai(
+        NFR_FOLLOW_UP_PROMPT,
+        f"""## Current NFR Context
+{context}
+{conversation}
+
+## User Question
+{question}
+""",
+        max_tokens=1400,
     )

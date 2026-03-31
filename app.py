@@ -5,6 +5,7 @@ Run with: streamlit run app.py
 """
 
 import os
+import html
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
@@ -13,7 +14,7 @@ load_dotenv()
 
 import streamlit as st
 
-from agents.nfr_agent import MODEL_NAME, estimate_usage_cost
+from agents.nfr_agent import MODEL_NAME, answer_nfr_question, estimate_usage_cost
 from utils.redaction import RedactionResult, redact_text, summarize_redaction
 
 SAVE_DIR = Path("saved_runs")
@@ -119,6 +120,133 @@ st.markdown("""
   .agent-card.running .dot { background: #3B82F6; animation: pulse-ring 1.2s infinite; }
   .agent-card.done    .dot { background: #16A34A; }
   .agent-card strong { font-weight: 700; }
+  .pipeline-progress-shell {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 14px;
+    padding: 1rem 1.1rem 1.1rem 1.1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .pipeline-progress-top {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    align-items: flex-start;
+    margin-bottom: 0.85rem;
+  }
+  .pipeline-progress-top .headline {
+    font-size: 0.98rem;
+    font-weight: 700;
+    color: #0F172A;
+    line-height: 1.3;
+  }
+  .pipeline-progress-top .subline {
+    font-size: 0.8rem;
+    color: #64748B;
+    margin-top: 0.2rem;
+  }
+  .pipeline-progress-pill {
+    flex: 0 0 auto;
+    border-radius: 999px;
+    background: #EEF2FF;
+    color: #4338CA;
+    padding: 0.35rem 0.7rem;
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+  }
+  .pipeline-progress-bar {
+    height: 9px;
+    border-radius: 999px;
+    background: #E2E8F0;
+    overflow: hidden;
+  }
+  .pipeline-progress-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #2563EB, #38BDF8);
+    transition: width 0.25s ease;
+  }
+  .pipeline-step-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.75rem;
+    margin-top: 0.95rem;
+  }
+  .pipeline-step {
+    border-radius: 12px;
+    border: 1px solid #E2E8F0;
+    background: #F8FAFC;
+    padding: 0.8rem 0.85rem;
+    min-height: 112px;
+  }
+  .pipeline-step.waiting {
+    background: #F8FAFC;
+    border-color: #E2E8F0;
+  }
+  .pipeline-step.running {
+    background: linear-gradient(180deg, #EFF6FF 0%, #DBEAFE 100%);
+    border-color: #93C5FD;
+    box-shadow: inset 0 0 0 1px rgba(59,130,246,0.08);
+  }
+  .pipeline-step.done {
+    background: linear-gradient(180deg, #F0FDF4 0%, #DCFCE7 100%);
+    border-color: #86EFAC;
+    box-shadow: inset 0 0 0 1px rgba(22,163,74,0.08);
+  }
+  .pipeline-step-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    margin-bottom: 0.55rem;
+  }
+  .pipeline-step-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-size: 0.78rem;
+    font-weight: 700;
+    background: #E2E8F0;
+    color: #334155;
+  }
+  .pipeline-step.running .pipeline-step-index {
+    background: #2563EB;
+    color: #FFFFFF;
+  }
+  .pipeline-step.done .pipeline-step-index {
+    background: #16A34A;
+    color: #FFFFFF;
+  }
+  .pipeline-step-state {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748B;
+  }
+  .pipeline-step.running .pipeline-step-state {
+    color: #1D4ED8;
+  }
+  .pipeline-step.done .pipeline-step-state {
+    color: #15803D;
+  }
+  .pipeline-step-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: #0F172A;
+    line-height: 1.3;
+  }
+  .pipeline-step-desc {
+    margin-top: 0.4rem;
+    font-size: 0.77rem;
+    color: #475569;
+    line-height: 1.45;
+  }
 
   @keyframes pulse-ring {
     0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgba(59,130,246,0.4); }
@@ -142,10 +270,23 @@ st.markdown("""
 
   /* Tabs */
   button[role="tab"] {
-    font-size: 0.95rem !important; font-weight: 600 !important;
+    font-size: 1rem !important; font-weight: 500 !important;
     padding: 0.6rem 1.2rem !important; color: #475569 !important;
   }
-  button[role="tab"][aria-selected="true"] { color: #4338CA !important; font-weight: 700 !important; }
+  button[role="tab"] p,
+  button[role="tab"] div,
+  button[role="tab"] span {
+    font-size: 1rem !important;
+    font-weight: 500 !important;
+    color: inherit !important;
+  }
+  button[role="tab"][aria-selected="true"] { color: #4338CA !important; font-weight: 900 !important; }
+  button[role="tab"][aria-selected="true"] p,
+  button[role="tab"][aria-selected="true"] div,
+  button[role="tab"][aria-selected="true"] span {
+    font-weight: 900 !important;
+    color: #4338CA !important;
+  }
   .stTabs [data-baseweb="tab-list"] {
     border-bottom: 2px solid #E2E8F0 !important;
     gap: 0.5rem !important; margin-bottom: 1rem !important;
@@ -185,6 +326,26 @@ st.markdown("""
   }
   [data-testid="stTextArea"] textarea:focus {
     border-color: #6366F1 !important; box-shadow: 0 0 0 3px rgba(99,102,241,0.1) !important;
+  }
+
+  /* Chat */
+  [data-testid="stChatMessage"] {
+    background: #FFFFFF !important;
+    border: 1px solid #E2E8F0 !important;
+    border-radius: 12px !important;
+    padding: 0.9rem 1rem !important;
+  }
+  [data-testid="stChatMessage"] [data-testid="stMarkdownContainer"] {
+    color: #334155 !important;
+  }
+  [data-testid="stChatInput"] {
+    background: #FFFFFF !important;
+    border-top: 1px solid #E2E8F0 !important;
+  }
+  [data-testid="stChatInput"] textarea,
+  [data-testid="stChatInput"] input {
+    background: #FFFFFF !important;
+    color: #1E293B !important;
   }
 
   /* Download */
@@ -231,6 +392,162 @@ st.markdown("""
     font-family: 'Courier New', Courier, monospace !important;
   }
 
+  .visual-panel {
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 1rem 1.1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    margin-bottom: 1rem;
+  }
+  .visual-panel h4 {
+    margin: 0 0 0.35rem 0;
+    font-size: 1rem;
+    color: #0F172A;
+  }
+  .visual-panel p {
+    margin: 0;
+    color: #64748B;
+    font-size: 0.82rem;
+  }
+  .category-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.8rem;
+    margin-top: 0.9rem;
+  }
+  .category-card {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    padding: 0.8rem 0.9rem;
+  }
+  .category-card .count {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #0F172A;
+  }
+  .category-card .label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #334155;
+    margin-top: 0.15rem;
+  }
+  .category-card .bar {
+    height: 7px;
+    border-radius: 999px;
+    background: #E2E8F0;
+    margin-top: 0.65rem;
+    overflow: hidden;
+  }
+  .category-card .bar > span {
+    display: block;
+    height: 100%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #2563EB, #38BDF8);
+  }
+  .heatmap-wrap {
+    margin-top: 0.9rem;
+  }
+  .heatmap-axis-top {
+    display: grid;
+    grid-template-columns: 84px repeat(5, minmax(100px, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    align-items: end;
+  }
+  .heatmap-axis-top .axis-label {
+    font-size: 0.75rem;
+    color: #64748B;
+    text-align: center;
+    font-weight: 600;
+  }
+  .heatmap-row {
+    display: grid;
+    grid-template-columns: 84px repeat(5, minmax(100px, 1fr));
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    align-items: stretch;
+  }
+  .heatmap-risk-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: #334155;
+    padding: 0.5rem;
+    text-align: center;
+  }
+  .heatmap-cell {
+    min-height: 84px;
+    border-radius: 12px;
+    border: 1px solid #E2E8F0;
+    background: #FFFFFF;
+    padding: 0.55rem;
+  }
+  .heatmap-cell.hot {
+    background: #FFF1F2;
+    border-color: #FECDD3;
+  }
+  .heatmap-cell.warm {
+    background: #FFF7ED;
+    border-color: #FED7AA;
+  }
+  .heatmap-cell.cool {
+    background: #F8FAFC;
+    border-color: #E2E8F0;
+  }
+  .heatmap-cell .cell-meta {
+    font-size: 0.7rem;
+    color: #64748B;
+    margin-bottom: 0.35rem;
+  }
+  .nfr-chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .nfr-chip {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.18rem 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 700;
+    background: #E2E8F0;
+    color: #334155;
+    white-space: nowrap;
+  }
+  .nfr-chip.critical {
+    background: #FECDD3;
+    color: #9F1239;
+  }
+  .nfr-chip.high {
+    background: #FED7AA;
+    color: #9A3412;
+  }
+  .nfr-chip.medium {
+    background: #FEF3C7;
+    color: #92400E;
+  }
+  .nfr-chip.low {
+    background: #DBEAFE;
+    color: #1D4ED8;
+  }
+  .priority-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin-top: 0.75rem;
+  }
+  .priority-legend .nfr-chip {
+    font-weight: 600;
+  }
+
   hr { border: none !important; border-top: 1px solid #E2E8F0 !important; margin: 1.2rem 0 !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -255,19 +572,85 @@ VALIDATE_AGENTS = [
     ("compliance", "Compliance Mapping Agent", "Mapping NFRs to relevant control frameworks"),
 ]
 
+GENERATE_TAB_DESCRIPTIONS = {
+    "clarify": "Shows the assumptions, open questions, and missing context that could affect NFR quality.",
+    "nfr": "Contains the generated non-functional requirements grouped by category with rationale and measurable targets.",
+    "score": "Summarises business risk, implementation complexity, and delivery priority for each NFR.",
+    "test": "Lists practical acceptance criteria and suggested test approaches for the most important NFRs.",
+    "conflict": "Highlights trade-offs, tensions, and direct conflicts across the NFR set.",
+    "remediate": "Suggests stronger rewrites and follow-up actions for weak, risky, or ambiguous NFRs.",
+    "compliance": "Maps the NFR pack to likely control frameworks and expected evidence areas.",
+    "download": "Download the full pack or individual artefacts from the current run.",
+    "ask": "Ask grounded follow-up questions about this run and get answers based on the outputs on this page.",
+}
 
-def render_agent_cards(agent_defs: list[tuple[str, str, str]], states: dict):
+VALIDATE_TAB_DESCRIPTIONS = {
+    "clarify": "Shows the assumptions and missing context that affect how the supplied NFRs should be assessed.",
+    "validate": "Reviews the current NFR set for gaps, vague wording, and conflicts against the system description.",
+    "remediate": "Suggests stronger wording and practical improvements for weak or incomplete NFRs.",
+    "compliance": "Maps the reviewed NFR set to likely compliance themes and evidence expectations.",
+    "download": "Download the full validation pack or individual review artefacts from this run.",
+    "ask": "Ask grounded follow-up questions about this validation run using the outputs on this page.",
+}
+
+
+def render_agent_cards(
+    agent_defs: list[tuple[str, str, str]],
+    states: dict,
+    completion_subline: str = "",
+):
     """Render progress cards for the provided agent set."""
-    html = ""
-    for key, label, description in agent_defs:
+    total_steps = len(agent_defs)
+    completed_steps = sum(1 for key, _, _ in agent_defs if states.get(key) == "done")
+    active_label = next((label for key, label, _ in agent_defs if states.get(key) == "running"), "")
+    partial_progress = 0.5 if active_label else 0.0
+    progress_percent = int(((completed_steps + partial_progress) / total_steps) * 100) if total_steps else 0
+
+    if completed_steps == total_steps and total_steps:
+        headline = "Pipeline complete"
+        subline = completion_subline or "All stages have finished successfully."
+    elif active_label:
+        headline = f"Now running: {active_label}"
+        subline = f"{completed_steps} of {total_steps} stages complete."
+    else:
+        headline = "Ready to start pipeline"
+        subline = f"{completed_steps} of {total_steps} stages complete."
+
+    html_parts = [
+        '<div class="pipeline-progress-shell">',
+        '<div class="pipeline-progress-top">',
+        f'<div><div class="headline">{headline}</div><div class="subline">{subline}</div></div>',
+        f'<div class="pipeline-progress-pill">{progress_percent}%</div>',
+        '</div>',
+        f'<div class="pipeline-progress-bar"><span style="width:{progress_percent}%"></span></div>',
+        '<div class="pipeline-step-grid">',
+    ]
+
+    for index, (key, label, description) in enumerate(agent_defs, start=1):
         state = states.get(key, "waiting")
-        icon = {"waiting": "&#9675;", "running": "&#9673;", "done": "&#9679;"}[state]
-        html += f"""
-        <div class="agent-card {state}">
-          <span class="dot"></span>
-          <span><strong>{icon} {label}</strong> - {description}</span>
-        </div>"""
-    return html
+        status_text = {
+            "waiting": "Queued",
+            "running": "Running",
+            "done": "Done",
+        }.get(state, "Queued")
+        html_parts.append(
+            f'<div class="pipeline-step {state}">'
+            f'<div class="pipeline-step-head">'
+            f'<span class="pipeline-step-index">{index}</span>'
+            f'<span class="pipeline-step-state">{status_text}</span>'
+            f'</div>'
+            f'<div class="pipeline-step-title">{label}</div>'
+            f'<div class="pipeline-step-desc">{description}</div>'
+            f'</div>'
+        )
+
+    html_parts.append("</div></div>")
+    return "".join(html_parts)
+
+
+def render_tab_description(text: str) -> None:
+    """Render a one-line explainer at the top of a tab."""
+    st.caption(text)
 
 
 def count_nfrs(nfr_text: str) -> int:
@@ -277,6 +660,126 @@ def count_nfrs(nfr_text: str) -> int:
 
 def count_critical(score_text: str) -> int:
     return score_text.upper().count("CRITICAL")
+
+
+def parse_nfr_category_counts(nfr_text: str) -> list[tuple[str, int]]:
+    """Extract NFR counts per category from generated markdown."""
+    import re
+
+    counts: dict[str, int] = {}
+    current_category = ""
+    for line in nfr_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#### "):
+            current_category = stripped[5:].strip()
+            counts.setdefault(current_category, 0)
+            continue
+        if current_category and re.match(r"^\|\s*NFR-\d+", stripped):
+            counts[current_category] += 1
+    return [(label, value) for label, value in counts.items() if value > 0]
+
+
+def parse_priority_rows(score_text: str) -> list[dict[str, str | int]]:
+    """Extract business risk, complexity, and priority rows from markdown."""
+    rows: list[dict[str, str | int]] = []
+    for line in score_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("| NFR-"):
+            continue
+        parts = [part.strip() for part in stripped.strip("|").split("|")]
+        if len(parts) < 5:
+            continue
+        try:
+            rows.append({
+                "id": parts[0],
+                "label": parts[1],
+                "risk": int(parts[2]),
+                "complexity": int(parts[3]),
+                "priority": parts[4].upper(),
+            })
+        except ValueError:
+            continue
+    return rows
+
+
+def render_category_overview(nfr_text: str) -> None:
+    """Render a category coverage summary for generated NFRs."""
+    counts = parse_nfr_category_counts(nfr_text)
+    if not counts:
+        return
+
+    max_count = max(count for _, count in counts)
+    html_parts = [
+        '<div class="visual-panel"><h4>NFR Coverage</h4><p>How the generated requirements are distributed across quality attribute categories.</p><div class="category-grid">'
+    ]
+    for label, count in counts:
+        width = int((count / max_count) * 100) if max_count else 0
+        safe_label = html.escape(label)
+        html_parts.append(
+            f'<div class="category-card">'
+            f'<div class="count">{count}</div>'
+            f'<div class="label">{safe_label}</div>'
+            f'<div class="bar"><span style="width:{width}%"></span></div>'
+            f'</div>'
+        )
+    html_parts.append("</div></div>")
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
+
+
+def render_priority_heatmap(score_text: str) -> None:
+    """Render a risk-vs-complexity heatmap from the priority matrix."""
+    rows = parse_priority_rows(score_text)
+    if not rows:
+        return
+
+    cell_map: dict[tuple[int, int], list[dict[str, str | int]]] = {}
+    for row in rows:
+        key = (int(row["risk"]), int(row["complexity"]))
+        cell_map.setdefault(key, []).append(row)
+
+    html_parts = [
+        '<div class="visual-panel"><h4>Priority Heatmap</h4><p>Each NFR is plotted by business risk and implementation complexity.</p><div class="heatmap-wrap">',
+        '<div class="heatmap-axis-top"><div></div>',
+    ]
+    for complexity in range(1, 6):
+        html_parts.append(f'<div class="axis-label">Complexity {complexity}</div>')
+    html_parts.append("</div>")
+
+    for risk in range(5, 0, -1):
+        html_parts.append('<div class="heatmap-row">')
+        html_parts.append(f'<div class="heatmap-risk-label">Risk {risk}</div>')
+        for complexity in range(1, 6):
+            items = cell_map.get((risk, complexity), [])
+            score_band = "cool"
+            if risk >= 4:
+                score_band = "hot"
+            elif risk == 3:
+                score_band = "warm"
+            html_parts.append(f'<div class="heatmap-cell {score_band}">')
+            html_parts.append(
+                f'<div class="cell-meta">{len(items)} item{"s" if len(items) != 1 else ""}</div>'
+            )
+            html_parts.append('<div class="nfr-chip-row">')
+            for item in items:
+                priority_class = str(item["priority"]).lower()
+                html_parts.append(
+                    f'<span class="nfr-chip {priority_class}" title="{item["label"]}">{item["id"]}</span>'
+                )
+            html_parts.append("</div></div>")
+        html_parts.append("</div>")
+
+    html_parts.append(
+        """
+        <div class="priority-legend">
+          <span class="nfr-chip critical">Critical</span>
+          <span class="nfr-chip high">High</span>
+          <span class="nfr-chip medium">Medium</span>
+          <span class="nfr-chip low">Low</span>
+        </div>
+        """
+    )
+    html_parts.append("</div></div>")
+    st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
 def render_redaction_preview(
@@ -369,6 +872,12 @@ def default_run_filename(mode: str) -> str:
     return f"nfr_{mode}_{ts}.md"
 
 
+def default_refined_run_filename(mode: str) -> str:
+    """Return a timestamped default filename for a refined run."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    return f"nfr_{mode}_refined_{ts}.md"
+
+
 def sanitize_filename(filename: str) -> str:
     """Return a filesystem-safe markdown filename."""
     cleaned = "".join(
@@ -384,6 +893,17 @@ def sanitize_filename(filename: str) -> str:
 def list_saved_runs() -> list[Path]:
     """List saved run files, newest first."""
     return sorted(SAVE_DIR.glob("*.md"), key=lambda item: item.stat().st_mtime, reverse=True)
+
+
+def extract_header_section(header: str, title: str) -> str:
+    """Extract a named markdown section from the saved-run header."""
+    import re
+
+    pattern = rf"(?ms)^## {re.escape(title)}\n(.*?)(?=^## |\Z)"
+    match = re.search(pattern, header.strip())
+    if not match:
+        return ""
+    return match.group(1).strip()
 
 
 def parse_saved_run(content: str) -> dict:
@@ -416,16 +936,22 @@ def parse_saved_run(content: str) -> dict:
     if len(sections) < len(result_keys) + 1:
         raise ValueError("Saved run is incomplete.")
 
-    system_description = header.split("## System Description", 1)[1].strip()
+    system_description = extract_header_section(header, "System Description")
+    if not system_description:
+        raise ValueError("Saved run is missing a system description.")
+
     results = {
         key: sections[index + 1]
         for index, key in enumerate(result_keys)
     }
-    return {
+    parsed = {
         "mode": mode,
         "system_description": system_description,
         "results": results,
     }
+    if mode == "validate":
+        parsed["existing_nfrs"] = extract_header_section(header, "Existing NFRs")
+    return parsed
 
 
 def save_run_file(filename: str, content: str) -> Path:
@@ -442,19 +968,24 @@ def load_saved_run(path: Path) -> None:
     mode = parsed["mode"]
     st.session_state.mode = mode
     st.session_state.system_description = parsed["system_description"]
+    st.session_state.existing_nfrs = parsed.get("existing_nfrs", "")
     st.session_state.results = parsed["results"]
     st.session_state.pipeline_complete = True
     st.session_state.usage_stats = {}
     st.session_state.save_status = f"Loaded `{path.name}`"
     st.session_state.load_status = ""
     st.session_state.result_source = "loaded"
+    st.session_state.generate_refinement_context = ""
+    st.session_state.validate_refinement_context = ""
 
     if mode == "generate":
         st.session_state.agent_states = {key: "done" for key, _, _ in GENERATE_AGENTS}
         st.session_state.generate_save_name = default_run_filename("generate")
+        reset_chat_history("generate")
     else:
         st.session_state.agent_states = {key: "done" for key, _, _ in VALIDATE_AGENTS}
         st.session_state.validate_save_name = default_run_filename("validate")
+        reset_chat_history("validate")
 
 
 def render_saved_runs_sidebar() -> None:
@@ -528,11 +1059,19 @@ Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}
 
 def build_validate_pack() -> str:
     """Build the full validate-mode markdown pack."""
+    existing_nfrs_section = ""
+    if st.session_state.existing_nfrs.strip():
+        existing_nfrs_section = f"""
+## Existing NFRs
+{st.session_state.existing_nfrs}
+"""
+
     return f"""# NFR Validation Pack
 Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}
 
 ## System Description
 {st.session_state.system_description}
+{existing_nfrs_section}
 
 ---
 
@@ -552,6 +1091,462 @@ Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}
 """
 
 
+def combine_refinement_context(current_description: str, additional_context: str) -> str:
+    """Append additional context to an existing system description."""
+    current = current_description.strip()
+    extra = additional_context.strip()
+    if not extra:
+        return current
+    return f"""{current}
+
+Additional context added later:
+{extra}
+"""
+
+
+def chat_history_key(mode: str) -> str:
+    """Return the session-state key for follow-up chat history."""
+    return f"{mode}_chat_history"
+
+
+def reset_chat_history(mode: str) -> None:
+    """Clear follow-up chat history for a mode."""
+    st.session_state[chat_history_key(mode)] = []
+
+
+def build_followup_context(mode: str) -> str:
+    """Build grounded context for follow-up Q&A."""
+    sections: list[tuple[str, str]] = []
+    if mode == "generate":
+        sections = [
+            ("Gap Clarification", st.session_state.results.get("clarify", "")),
+            ("Generated NFRs", st.session_state.results.get("nfr", "")),
+            ("Priority Matrix", st.session_state.results.get("score", "")),
+            ("Test Acceptance Criteria", st.session_state.results.get("test", "")),
+            ("Conflicts", st.session_state.results.get("conflict", "")),
+            ("Remediation", st.session_state.results.get("remediate", "")),
+            ("Compliance Mapping", st.session_state.results.get("compliance", "")),
+        ]
+    else:
+        sections = [
+            ("Gap Clarification", st.session_state.results.get("clarify", "")),
+            ("Validation Report", st.session_state.results.get("validate", "")),
+            ("Remediation", st.session_state.results.get("remediate", "")),
+            ("Compliance Mapping", st.session_state.results.get("compliance", "")),
+        ]
+
+    parts = [
+        f"## Mode\n{mode.title()}",
+        f"## System Description\n{st.session_state.system_description}",
+    ]
+    existing_nfrs = st.session_state.get("existing_nfrs", "").strip()
+    if mode == "validate" and existing_nfrs:
+        parts.append(f"## Existing NFRs\n{existing_nfrs}")
+
+    for title, content in sections:
+        if content:
+            parts.append(f"## {title}\n{content}")
+    return "\n\n".join(parts)
+
+
+def render_followup_chat(mode: str) -> None:
+    """Render grounded follow-up chat for the current run."""
+    history = st.session_state[chat_history_key(mode)]
+
+    _, action_col = st.columns([4, 1])
+    with action_col:
+        if st.button("Clear chat", use_container_width=True, key=f"clear_{mode}_chat"):
+            reset_chat_history(mode)
+            st.rerun()
+
+    if not history:
+        st.info(
+            "Try asking: `Which NFRs matter most for MVP?`, "
+            "`What should I clarify with stakeholders next?`, or "
+            "`Rewrite the security NFRs more tightly.`"
+        )
+
+    for message in history:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    prompt = st.chat_input(
+        "Ask about this NFR pack...",
+        key=f"{mode}_chat_input",
+    )
+    if not prompt:
+        return
+
+    history.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    try:
+        with st.chat_message("assistant"):
+            with st.spinner("Reviewing the current NFR pack..."):
+                answer = answer_nfr_question(
+                    build_followup_context(mode),
+                    prompt,
+                    history[:-1],
+                )
+                st.markdown(answer.content)
+        history.append({"role": "assistant", "content": answer.content})
+    except Exception as exc:
+        history.pop()
+        st.error(f"Could not answer the follow-up question: {exc}")
+
+
+def prepare_run_state(
+    mode: str,
+    system_description: str,
+    *,
+    existing_nfrs: str = "",
+    result_source: str = "fresh",
+    save_name: str | None = None,
+) -> None:
+    """Reset shared state before executing a pipeline run."""
+    st.session_state.system_description = system_description
+    st.session_state.existing_nfrs = existing_nfrs
+    st.session_state.agent_states = {}
+    st.session_state.results = {}
+    st.session_state.usage_stats = {}
+    st.session_state.save_status = ""
+    st.session_state.load_status = ""
+    st.session_state.result_source = result_source
+    st.session_state.pipeline_complete = False
+
+    if mode == "generate":
+        st.session_state.generate_save_name = save_name or default_run_filename("generate")
+    else:
+        st.session_state.validate_save_name = save_name or default_run_filename("validate")
+
+    st.session_state[f"{mode}_refinement_context"] = ""
+    reset_chat_history(mode)
+
+
+def run_generate_pipeline(
+    system_description: str,
+    *,
+    result_source: str = "fresh",
+    save_name: str | None = None,
+) -> None:
+    """Execute the full generate pipeline and persist results to session state."""
+    prepare_run_state(
+        "generate",
+        system_description,
+        result_source=result_source,
+        save_name=save_name,
+    )
+    st.session_state.agent_states = {k: "waiting" for k, _, _ in GENERATE_AGENTS}
+
+    st.markdown("---")
+    st.markdown("#### Pipeline Progress")
+    progress_placeholder = st.empty()
+
+    def update_progress() -> None:
+                progress_placeholder.markdown(
+            render_agent_cards(
+                GENERATE_AGENTS,
+                st.session_state.agent_states,
+                "Seven agents turn a system description into a prioritized and testable NFR pack.",
+            ),
+            unsafe_allow_html=True,
+        )
+
+    update_progress()
+
+    try:
+        from agents.nfr_agent import (
+            clarify_gaps,
+            detect_conflicts,
+            generate_nfrs,
+            generate_test_criteria,
+            map_compliance,
+            remediate_nfrs,
+            score_nfrs,
+        )
+
+        st.session_state.agent_states["clarify"] = "running"; update_progress()
+        clarify_run = clarify_gaps(st.session_state.system_description)
+        clarify_result = clarify_run.content
+        st.session_state.results["clarify"] = clarify_result
+        record_usage("clarify", "Gap Clarification Agent", clarify_run)
+        st.session_state.agent_states["clarify"] = "done"; update_progress()
+
+        st.session_state.agent_states["nfr"] = "running"; update_progress()
+        nfr_input = f"""## Source System Description
+{st.session_state.system_description}
+
+## Gap Clarification Analysis
+{clarify_result}
+
+Use the source description as the primary input. Treat the clarification analysis as working assumptions and open questions."""
+        nfr_run = generate_nfrs(nfr_input)
+        nfr_result = nfr_run.content
+        st.session_state.results["nfr"] = nfr_result
+        record_usage("nfr", "NFR Generation Agent", nfr_run)
+        st.session_state.agent_states["nfr"] = "done"; update_progress()
+
+        st.session_state.agent_states["score"] = "running"; update_progress()
+        score_run = score_nfrs(nfr_result)
+        score_result = score_run.content
+        st.session_state.results["score"] = score_result
+        record_usage("score", "Scoring & Priority Agent", score_run)
+        st.session_state.agent_states["score"] = "done"; update_progress()
+
+        st.session_state.agent_states["test"] = "running"; update_progress()
+        test_run = generate_test_criteria(nfr_result, score_result)
+        test_result = test_run.content
+        st.session_state.results["test"] = test_result
+        record_usage("test", "Test Criteria Agent", test_run)
+        st.session_state.agent_states["test"] = "done"; update_progress()
+
+        st.session_state.agent_states["conflict"] = "running"; update_progress()
+        conflict_run = detect_conflicts(nfr_result)
+        conflict_result = conflict_run.content
+        st.session_state.results["conflict"] = conflict_result
+        record_usage("conflict", "Conflict Detection Agent", conflict_run)
+        st.session_state.agent_states["conflict"] = "done"; update_progress()
+
+        st.session_state.agent_states["remediate"] = "running"; update_progress()
+        remediation_input = f"""## Gap Clarification
+{clarify_result}
+
+## Priority Analysis
+{score_result}
+
+## Conflict Analysis
+{conflict_result}
+"""
+        remediation_run = remediate_nfrs(
+            st.session_state.system_description,
+            nfr_result,
+            remediation_input,
+        )
+        remediation_result = remediation_run.content
+        st.session_state.results["remediate"] = remediation_result
+        record_usage("remediate", "Remediation Agent", remediation_run)
+        st.session_state.agent_states["remediate"] = "done"; update_progress()
+
+        st.session_state.agent_states["compliance"] = "running"; update_progress()
+        compliance_input = f"""## Priority Analysis
+{score_result}
+
+## Remediation Plan
+{remediation_result}
+"""
+        compliance_run = map_compliance(
+            st.session_state.system_description,
+            nfr_result,
+            compliance_input,
+        )
+        compliance_result = compliance_run.content
+        st.session_state.results["compliance"] = compliance_result
+        record_usage("compliance", "Compliance Mapping Agent", compliance_run)
+        st.session_state.agent_states["compliance"] = "done"; update_progress()
+
+        st.session_state.pipeline_complete = True
+        st.rerun()
+    except Exception as exc:
+        st.error(f"Pipeline error: {exc}")
+        raise
+
+
+def run_validate_pipeline(
+    system_description: str,
+    existing_nfrs: str,
+    *,
+    result_source: str = "fresh",
+    save_name: str | None = None,
+) -> None:
+    """Execute the full validate pipeline and persist results to session state."""
+    prepare_run_state(
+        "validate",
+        system_description,
+        existing_nfrs=existing_nfrs,
+        result_source=result_source,
+        save_name=save_name,
+    )
+    st.session_state.agent_states = {k: "waiting" for k, _, _ in VALIDATE_AGENTS}
+
+    st.markdown("---")
+    st.markdown("#### Review Progress")
+    progress_placeholder = st.empty()
+    progress_placeholder.markdown(
+        render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
+        unsafe_allow_html=True,
+    )
+
+    try:
+        from agents.nfr_agent import (
+            clarify_gaps,
+            map_compliance,
+            remediate_nfrs,
+            validate_nfrs,
+        )
+
+        st.session_state.agent_states["clarify"] = "running"
+        progress_placeholder.markdown(
+            render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
+            unsafe_allow_html=True,
+        )
+        clarify_run = clarify_gaps(system_description)
+        clarify_result = clarify_run.content
+        st.session_state.results["clarify"] = clarify_result
+        record_usage("clarify", "Gap Clarification Agent", clarify_run)
+        st.session_state.agent_states["clarify"] = "done"
+
+        st.session_state.agent_states["validate"] = "running"
+        progress_placeholder.markdown(
+            render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
+            unsafe_allow_html=True,
+        )
+        validation_system_context = f"""## Source System Description
+{system_description}
+
+## Gap Clarification Analysis
+{clarify_result}
+"""
+        validation_run = validate_nfrs(validation_system_context, existing_nfrs)
+        validation_result = validation_run.content
+        st.session_state.results["validate"] = validation_result
+        record_usage("validate", "NFR Validation Agent", validation_run)
+        st.session_state.agent_states["validate"] = "done"
+
+        st.session_state.agent_states["remediate"] = "running"
+        progress_placeholder.markdown(
+            render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
+            unsafe_allow_html=True,
+        )
+        remediation_run = remediate_nfrs(
+            system_description,
+            existing_nfrs,
+            validation_result,
+        )
+        remediation_result = remediation_run.content
+        st.session_state.results["remediate"] = remediation_result
+        record_usage("remediate", "Remediation Agent", remediation_run)
+        st.session_state.agent_states["remediate"] = "done"
+
+        st.session_state.agent_states["compliance"] = "running"
+        progress_placeholder.markdown(
+            render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
+            unsafe_allow_html=True,
+        )
+        compliance_run = map_compliance(
+            system_description,
+            existing_nfrs,
+            validation_result,
+        )
+        compliance_result = compliance_run.content
+        st.session_state.results["compliance"] = compliance_result
+        record_usage("compliance", "Compliance Mapping Agent", compliance_run)
+        st.session_state.agent_states["compliance"] = "done"
+        progress_placeholder.markdown(
+            render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
+            unsafe_allow_html=True,
+        )
+
+        st.session_state.pipeline_complete = True
+        st.rerun()
+    except Exception as exc:
+        st.error(f"Error: {exc}")
+        raise
+
+
+def render_refinement_panel(mode: str) -> None:
+    """Allow users to add more context and rerun the current workflow."""
+    st.markdown("---")
+    st.markdown("#### Add More Context")
+    st.caption(
+        "Use this when you learn more after the first pass. "
+        "The app keeps the current context, appends your new information, and reruns as a new version."
+    )
+
+    if mode == "validate" and not st.session_state.existing_nfrs.strip():
+        st.warning(
+            "This validation run does not include the original NFR input, so it cannot be refined automatically."
+        )
+        return
+
+    show_current_context = st.checkbox(
+        "Show current source context",
+        key=f"{mode}_show_refine_context",
+    )
+    if show_current_context:
+        st.text_area(
+            "Current system context",
+            value=st.session_state.system_description,
+            height=180,
+            key=f"{mode}_current_context_preview",
+            disabled=True,
+        )
+        if mode == "validate":
+            st.text_area(
+                "Current NFR input",
+                value=st.session_state.existing_nfrs,
+                height=180,
+                key=f"{mode}_current_nfr_preview",
+                disabled=True,
+            )
+
+    st.checkbox(
+        "Redact sensitive data before sending to OpenAI",
+        key="redaction_enabled",
+        help="Masks emails, URLs, domains, IPs, UUIDs, and secret-like values before model calls.",
+    )
+
+    additional_context = st.text_area(
+        "Additional context",
+        key=f"{mode}_refinement_context",
+        height=160,
+        placeholder=(
+            "Add newly learned constraints, integrations, compliance scope, volume changes, "
+            "or stakeholder clarifications..."
+        ),
+    )
+
+    redacted_context_result = None
+    if st.session_state.redaction_enabled and additional_context.strip():
+        redacted_context_result = redact_text(additional_context.strip())
+        render_redaction_preview(
+            "Preview redacted additional context",
+            redacted_context_result,
+            f"{mode}_refinement_redaction_preview",
+            height=140,
+        )
+
+    button_label = "Refine Loaded Run" if st.session_state.result_source == "loaded" else "Rerun With More Context"
+    if st.button(button_label, type="primary", use_container_width=True, key=f"{mode}_refine_run"):
+        if not additional_context.strip():
+            st.warning("Add some extra context before rerunning.")
+            return
+
+        processed_additional_context = additional_context.strip()
+        if st.session_state.redaction_enabled and redacted_context_result is not None:
+            processed_additional_context = redacted_context_result.redacted_text
+
+        refined_description = combine_refinement_context(
+            st.session_state.system_description,
+            processed_additional_context,
+        )
+        st.session_state[f"{mode}_refinement_context"] = ""
+
+        if mode == "generate":
+            run_generate_pipeline(
+                refined_description,
+                result_source="refined",
+                save_name=default_refined_run_filename("generate"),
+            )
+        else:
+            run_validate_pipeline(
+                refined_description,
+                st.session_state.existing_nfrs,
+                result_source="refined",
+                save_name=default_refined_run_filename("validate"),
+            )
+
+
 # â”€â”€ Session state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 if "mode" not in st.session_state:
     st.session_state.mode = "generate"
@@ -561,6 +1556,8 @@ if "results" not in st.session_state:
     st.session_state.results = {}
 if "system_description" not in st.session_state:
     st.session_state.system_description = ""
+if "existing_nfrs" not in st.session_state:
+    st.session_state.existing_nfrs = ""
 if "pipeline_complete" not in st.session_state:
     st.session_state.pipeline_complete = False
 if "redaction_enabled" not in st.session_state:
@@ -577,6 +1574,14 @@ if "generate_save_name" not in st.session_state:
     st.session_state.generate_save_name = default_run_filename("generate")
 if "validate_save_name" not in st.session_state:
     st.session_state.validate_save_name = default_run_filename("validate")
+if "generate_chat_history" not in st.session_state:
+    st.session_state.generate_chat_history = []
+if "validate_chat_history" not in st.session_state:
+    st.session_state.validate_chat_history = []
+if "generate_refinement_context" not in st.session_state:
+    st.session_state.generate_refinement_context = ""
+if "validate_refinement_context" not in st.session_state:
+    st.session_state.validate_refinement_context = ""
 
 
 # â”€â”€ Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -586,6 +1591,8 @@ with st.sidebar:
 
     if st.button("Generate NFR Pack", use_container_width=True, type="primary"):
         st.session_state.mode = "generate"
+        st.session_state.existing_nfrs = ""
+        st.session_state.generate_refinement_context = ""
         st.session_state.results = {}
         st.session_state.agent_states = {}
         st.session_state.usage_stats = {}
@@ -594,10 +1601,13 @@ with st.sidebar:
         st.session_state.result_source = "fresh"
         st.session_state.generate_save_name = default_run_filename("generate")
         st.session_state.pipeline_complete = False
+        reset_chat_history("generate")
         st.rerun()
 
     if st.button("Validate Existing NFRs", use_container_width=True):
         st.session_state.mode = "validate"
+        st.session_state.existing_nfrs = ""
+        st.session_state.validate_refinement_context = ""
         st.session_state.results = {}
         st.session_state.agent_states = {}
         st.session_state.usage_stats = {}
@@ -606,6 +1616,7 @@ with st.sidebar:
         st.session_state.result_source = "fresh"
         st.session_state.validate_save_name = default_run_filename("validate")
         st.session_state.pipeline_complete = False
+        reset_chat_history("validate")
         st.rerun()
 
     st.markdown("---")
@@ -670,131 +1681,7 @@ if st.session_state.mode == "generate":
             if redaction_enabled and redacted_system_result is not None:
                 processed_system_description = redacted_system_result.redacted_text
 
-            st.session_state.system_description = processed_system_description
-            st.session_state.agent_states = {k: "waiting" for k, _, _ in GENERATE_AGENTS}
-            st.session_state.results = {}
-            st.session_state.usage_stats = {}
-            st.session_state.save_status = ""
-            st.session_state.load_status = ""
-            st.session_state.result_source = "fresh"
-            st.session_state.generate_save_name = default_run_filename("generate")
-
-            st.markdown("---")
-            st.markdown("#### Pipeline Progress")
-            progress_placeholder = st.empty()
-
-            def update_progress():
-                progress_placeholder.markdown(
-                    render_agent_cards(GENERATE_AGENTS, st.session_state.agent_states),
-                    unsafe_allow_html=True
-                )
-
-            update_progress()
-
-            try:
-                from agents.nfr_agent import (
-                    clarify_gaps,
-                    detect_conflicts,
-                    generate_nfrs,
-                    generate_test_criteria,
-                    map_compliance,
-                    remediate_nfrs,
-                    score_nfrs,
-                )
-
-                # Agent 0
-                st.session_state.agent_states["clarify"] = "running"; update_progress()
-                clarify_run = clarify_gaps(st.session_state.system_description)
-                clarify_result = clarify_run.content
-                st.session_state.results["clarify"] = clarify_result
-                record_usage("clarify", "Gap Clarification Agent", clarify_run)
-                st.session_state.agent_states["clarify"] = "done"; update_progress()
-
-                # Agent 1
-                st.session_state.agent_states["nfr"] = "running"; update_progress()
-                nfr_input = f"""## Source System Description
-{st.session_state.system_description}
-
-## Gap Clarification Analysis
-{clarify_result}
-
-Use the source description as the primary input. Treat the clarification analysis as working assumptions and open questions."""
-                nfr_run = generate_nfrs(nfr_input)
-                nfr_result = nfr_run.content
-                st.session_state.results["nfr"] = nfr_result
-                record_usage("nfr", "NFR Generation Agent", nfr_run)
-                st.session_state.agent_states["nfr"] = "done"; update_progress()
-
-                # Agent 2
-                st.session_state.agent_states["score"] = "running"; update_progress()
-                score_run = score_nfrs(nfr_result)
-                score_result = score_run.content
-                st.session_state.results["score"] = score_result
-                record_usage("score", "Scoring & Priority Agent", score_run)
-                st.session_state.agent_states["score"] = "done"; update_progress()
-
-                # Agent 3
-                st.session_state.agent_states["test"] = "running"; update_progress()
-                test_run = generate_test_criteria(nfr_result, score_result)
-                test_result = test_run.content
-                st.session_state.results["test"] = test_result
-                record_usage("test", "Test Criteria Agent", test_run)
-                st.session_state.agent_states["test"] = "done"; update_progress()
-
-                # Agent 4
-                st.session_state.agent_states["conflict"] = "running"; update_progress()
-                conflict_run = detect_conflicts(nfr_result)
-                conflict_result = conflict_run.content
-                st.session_state.results["conflict"] = conflict_result
-                record_usage("conflict", "Conflict Detection Agent", conflict_run)
-                st.session_state.agent_states["conflict"] = "done"; update_progress()
-
-                # Agent 5
-                st.session_state.agent_states["remediate"] = "running"; update_progress()
-                remediation_input = f"""## Gap Clarification
-{clarify_result}
-
-## Priority Analysis
-{score_result}
-
-## Conflict Analysis
-{conflict_result}
-"""
-                remediation_run = remediate_nfrs(
-                    st.session_state.system_description,
-                    nfr_result,
-                    remediation_input,
-                )
-                remediation_result = remediation_run.content
-                st.session_state.results["remediate"] = remediation_result
-                record_usage("remediate", "Remediation Agent", remediation_run)
-                st.session_state.agent_states["remediate"] = "done"; update_progress()
-
-                # Agent 6
-                st.session_state.agent_states["compliance"] = "running"; update_progress()
-                compliance_input = f"""## Priority Analysis
-{score_result}
-
-## Remediation Plan
-{remediation_result}
-"""
-                compliance_run = map_compliance(
-                    st.session_state.system_description,
-                    nfr_result,
-                    compliance_input,
-                )
-                compliance_result = compliance_run.content
-                st.session_state.results["compliance"] = compliance_result
-                record_usage("compliance", "Compliance Mapping Agent", compliance_run)
-                st.session_state.agent_states["compliance"] = "done"; update_progress()
-
-                st.session_state.pipeline_complete = True
-                st.session_state.result_source = "fresh"
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"Pipeline error: {e}")
-                raise
+            run_generate_pipeline(processed_system_description, result_source="fresh")
 
         elif run:
             st.warning("Please describe your system before running the pipeline.")
@@ -805,7 +1692,11 @@ Use the source description as the primary input. Treat the clarification analysi
         # Persistent agent cards
         st.markdown("#### Pipeline Progress")
         st.markdown(
-            render_agent_cards(GENERATE_AGENTS, st.session_state.agent_states),
+            render_agent_cards(
+                GENERATE_AGENTS,
+                st.session_state.agent_states,
+                "Seven agents turn a system description into a prioritized and testable NFR pack.",
+            ),
             unsafe_allow_html=True
         )
 
@@ -820,6 +1711,9 @@ Use the source description as the primary input. Treat the clarification analysi
         m3.metric("Agents Run", len(GENERATE_AGENTS))
         m4.metric("Status", "Complete")
 
+        render_category_overview(st.session_state.results.get("nfr", ""))
+        render_priority_heatmap(st.session_state.results.get("score", ""))
+
         # Tabs
         (
             tab_clarify,
@@ -830,6 +1724,7 @@ Use the source description as the primary input. Treat the clarification analysi
             tab_remediate,
             tab_compliance,
             tab_download,
+            tab_ask,
         ) = st.tabs([
             "Clarification",
             "NFRs",
@@ -839,32 +1734,40 @@ Use the source description as the primary input. Treat the clarification analysi
             "Remediation",
             "Compliance",
             "Download",
+            "Ask",
         ])
 
         with tab_clarify:
+            render_tab_description(GENERATE_TAB_DESCRIPTIONS["clarify"])
             st.markdown(st.session_state.results.get("clarify", ""))
 
         with tab_nfr:
+            render_tab_description(GENERATE_TAB_DESCRIPTIONS["nfr"])
             st.markdown(st.session_state.results.get("nfr", ""))
 
         with tab_score:
+            render_tab_description(GENERATE_TAB_DESCRIPTIONS["score"])
             st.markdown(st.session_state.results.get("score", ""))
 
         with tab_test:
+            render_tab_description(GENERATE_TAB_DESCRIPTIONS["test"])
             st.markdown(st.session_state.results.get("test", ""))
 
         with tab_conflict:
+            render_tab_description(GENERATE_TAB_DESCRIPTIONS["conflict"])
             st.markdown(st.session_state.results.get("conflict", ""))
 
         with tab_remediate:
+            render_tab_description(GENERATE_TAB_DESCRIPTIONS["remediate"])
             st.markdown(st.session_state.results.get("remediate", ""))
 
         with tab_compliance:
+            render_tab_description(GENERATE_TAB_DESCRIPTIONS["compliance"])
             st.markdown(st.session_state.results.get("compliance", ""))
 
         with tab_download:
+            render_tab_description(GENERATE_TAB_DESCRIPTIONS["download"])
             st.markdown("#### Downloads")
-            st.caption("Download individual outputs or the full combined pack.")
 
             # Combined pack
             combined = build_generate_pack()
@@ -931,6 +1834,12 @@ Use the source description as the primary input. Treat the clarification analysi
                     use_container_width=True,
                 )
 
+        with tab_ask:
+            render_tab_description(GENERATE_TAB_DESCRIPTIONS["ask"])
+            render_followup_chat("generate")
+
+        render_refinement_panel("generate")
+
         if st.session_state.result_source != "loaded":
             st.markdown("---")
             st.markdown("#### Save this run")
@@ -960,7 +1869,10 @@ Use the source description as the primary input. Treat the clarification analysi
             st.session_state.agent_states = {}
             st.session_state.usage_stats = {}
             st.session_state.save_status = ""
+            st.session_state.existing_nfrs = ""
             st.session_state.generate_save_name = default_run_filename("generate")
+            st.session_state.generate_refinement_context = ""
+            reset_chat_history("generate")
             st.rerun()
         render_usage_summary(st.session_state.usage_stats)
 
@@ -1039,100 +1951,11 @@ elif st.session_state.mode == "validate":
             if redaction_enabled and redacted_nfrs_result is not None:
                 processed_existing_nfrs = redacted_nfrs_result.redacted_text
 
-            st.session_state.system_description = processed_system_description
-            st.session_state.agent_states = {k: "waiting" for k, _, _ in VALIDATE_AGENTS}
-            st.session_state.results = {}
-            st.session_state.usage_stats = {}
-            st.session_state.save_status = ""
-            st.session_state.load_status = ""
-            st.session_state.result_source = "fresh"
-            st.session_state.validate_save_name = default_run_filename("validate")
-
-            st.markdown("---")
-            st.markdown("#### Review Progress")
-            progress_placeholder = st.empty()
-            progress_placeholder.markdown(
-                render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
-                unsafe_allow_html=True,
+            run_validate_pipeline(
+                processed_system_description,
+                processed_existing_nfrs,
+                result_source="fresh",
             )
-
-
-            try:
-                from agents.nfr_agent import (
-                    clarify_gaps,
-                    map_compliance,
-                    remediate_nfrs,
-                    validate_nfrs,
-                )
-
-                st.session_state.agent_states["clarify"] = "running"
-                progress_placeholder.markdown(
-                    render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
-                    unsafe_allow_html=True,
-                )
-                clarify_run = clarify_gaps(processed_system_description)
-                clarify_result = clarify_run.content
-                st.session_state.results["clarify"] = clarify_result
-                record_usage("clarify", "Gap Clarification Agent", clarify_run)
-                st.session_state.agent_states["clarify"] = "done"
-
-                st.session_state.agent_states["validate"] = "running"
-                progress_placeholder.markdown(
-                    render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
-                    unsafe_allow_html=True,
-                )
-                validation_system_context = f"""## Source System Description
-{processed_system_description}
-
-## Gap Clarification Analysis
-{clarify_result}
-"""
-                validation_run = validate_nfrs(validation_system_context, processed_existing_nfrs)
-                validation_result = validation_run.content
-                st.session_state.results["validate"] = validation_result
-                record_usage("validate", "NFR Validation Agent", validation_run)
-                st.session_state.agent_states["validate"] = "done"
-
-                st.session_state.agent_states["remediate"] = "running"
-                progress_placeholder.markdown(
-                    render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
-                    unsafe_allow_html=True,
-                )
-                remediation_run = remediate_nfrs(
-                    processed_system_description,
-                    processed_existing_nfrs,
-                    validation_result,
-                )
-                remediation_result = remediation_run.content
-                st.session_state.results["remediate"] = remediation_result
-                record_usage("remediate", "Remediation Agent", remediation_run)
-                st.session_state.agent_states["remediate"] = "done"
-
-                st.session_state.agent_states["compliance"] = "running"
-                progress_placeholder.markdown(
-                    render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
-                    unsafe_allow_html=True,
-                )
-                compliance_run = map_compliance(
-                    processed_system_description,
-                    processed_existing_nfrs,
-                    validation_result,
-                )
-                compliance_result = compliance_run.content
-                st.session_state.results["compliance"] = compliance_result
-                record_usage("compliance", "Compliance Mapping Agent", compliance_run)
-                st.session_state.agent_states["compliance"] = "done"
-                progress_placeholder.markdown(
-                    render_agent_cards(VALIDATE_AGENTS, st.session_state.agent_states),
-                    unsafe_allow_html=True,
-                )
-
-                st.session_state.pipeline_complete = True
-                st.session_state.result_source = "fresh"
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error: {e}")
-                raise
 
         elif run:
             st.warning("Please fill in both fields before validating.")
@@ -1144,35 +1967,42 @@ elif st.session_state.mode == "validate":
             unsafe_allow_html=True,
         )
 
+        st.markdown("---")
         (
             tab_clarify,
             tab_validate,
             tab_remediate,
             tab_compliance,
             tab_download,
+            tab_ask,
         ) = st.tabs([
             "Clarification",
             "Validation",
             "Remediation",
             "Compliance",
             "Download",
+            "Ask",
         ])
 
         with tab_clarify:
+            render_tab_description(VALIDATE_TAB_DESCRIPTIONS["clarify"])
             st.markdown(st.session_state.results.get("clarify", ""))
 
         with tab_validate:
+            render_tab_description(VALIDATE_TAB_DESCRIPTIONS["validate"])
             st.markdown(st.session_state.results.get("validate", ""))
 
         with tab_remediate:
+            render_tab_description(VALIDATE_TAB_DESCRIPTIONS["remediate"])
             st.markdown(st.session_state.results.get("remediate", ""))
 
         with tab_compliance:
+            render_tab_description(VALIDATE_TAB_DESCRIPTIONS["compliance"])
             st.markdown(st.session_state.results.get("compliance", ""))
 
         with tab_download:
+            render_tab_description(VALIDATE_TAB_DESCRIPTIONS["download"])
             st.markdown("#### Downloads")
-            st.caption("Download the combined review output or any individual artefact.")
 
             combined = build_validate_pack()
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1210,6 +2040,12 @@ elif st.session_state.mode == "validate":
                     use_container_width=True,
                 )
 
+        with tab_ask:
+            render_tab_description(VALIDATE_TAB_DESCRIPTIONS["ask"])
+            render_followup_chat("validate")
+
+        render_refinement_panel("validate")
+
         if st.session_state.result_source != "loaded":
             st.markdown("---")
             st.markdown("#### Save this run")
@@ -1238,6 +2074,9 @@ elif st.session_state.mode == "validate":
             st.session_state.agent_states = {}
             st.session_state.usage_stats = {}
             st.session_state.save_status = ""
+            st.session_state.existing_nfrs = ""
             st.session_state.validate_save_name = default_run_filename("validate")
+            st.session_state.validate_refinement_context = ""
+            reset_chat_history("validate")
             st.rerun()
         render_usage_summary(st.session_state.usage_stats)
