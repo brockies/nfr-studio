@@ -15,7 +15,12 @@ load_dotenv()
 import streamlit as st
 
 from agents.nfr_agent import MODEL_NAME, answer_nfr_question, estimate_usage_cost
-from utils.redaction import RedactionResult, redact_text, summarize_redaction
+from utils.redaction import (
+    RedactionResult,
+    describe_redaction_items,
+    redact_text,
+    summarize_redaction,
+)
 
 SAVE_DIR = Path("saved_runs")
 SAVE_DIR.mkdir(exist_ok=True)
@@ -36,7 +41,29 @@ st.markdown("""
     color: #1E293B;
   }
   .block-container { padding-top: 0.5rem !important; padding-left: 2rem !important; }
-  header[data-testid="stHeader"] { background: transparent; }
+  header[data-testid="stHeader"] {
+    background: rgba(248, 250, 252, 0.92) !important;
+    border-bottom: 1px solid #E2E8F0 !important;
+    backdrop-filter: blur(8px);
+  }
+  header[data-testid="stHeader"] button,
+  header[data-testid="stHeader"] a,
+  header[data-testid="stHeader"] [role="button"],
+  header[data-testid="stHeader"] label,
+  header[data-testid="stHeader"] span,
+  header[data-testid="stHeader"] div {
+    color: #475569 !important;
+    font-family: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
+  }
+  header[data-testid="stHeader"] svg {
+    fill: #64748B !important;
+    color: #64748B !important;
+  }
+  header[data-testid="stHeader"] button:hover,
+  header[data-testid="stHeader"] a:hover,
+  header[data-testid="stHeader"] [role="button"]:hover {
+    color: #1E293B !important;
+  }
   [data-testid="stSidebarCollapseButton"] { display: block !important; }
   .stApp { background: #E2E8F0; }
 
@@ -105,6 +132,49 @@ st.markdown("""
     color: #0F172A; margin: 0;
   }
   .header-block p { color: #94A3B8; margin: 0.35rem 0 0 0; font-size: 0.88rem; }
+  .tab-description {
+    color: #334155;
+    font-size: 1rem;
+    font-weight: 500;
+    line-height: 1.55;
+    margin: 0 0 0.95rem 0;
+  }
+  .form-hint {
+    color: #334155;
+    font-size: 0.96rem;
+    line-height: 1.55;
+    margin: 0.2rem 0 0.55rem 0;
+  }
+  .redaction-summary {
+    border: 1px solid #E2E8F0;
+    border-radius: 10px;
+    padding: 0.7rem 0.9rem;
+    margin: 0.45rem 0 0.75rem 0;
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+  .redaction-summary.changed {
+    background: #FEF2F2;
+    border-color: #FECACA;
+    color: #991B1B;
+  }
+  .redaction-summary.unchanged {
+    background: #F8FAFC;
+    border-color: #E2E8F0;
+    color: #475569;
+  }
+  .redaction-summary-label {
+    font-weight: 700;
+    color: inherit;
+  }
+  .redaction-summary-list {
+    margin: 0.45rem 0 0 1.15rem;
+    padding: 0;
+  }
+  .redaction-summary-list li {
+    color: inherit;
+    margin: 0.12rem 0;
+  }
 
   /* Agent cards */
   .agent-card {
@@ -371,10 +441,60 @@ st.markdown("""
     font-family: -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif !important;
   }
   .stMarkdown strong { color: #0F172A !important; }
+  [data-testid="stMarkdownContainer"] table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    table-layout: fixed !important;
+    margin: 0.45rem 0 1.2rem 0 !important;
+  }
   [data-testid="stMarkdownContainer"] p,
   [data-testid="stMarkdownContainer"] li,
   [data-testid="stMarkdownContainer"] td {
     color: #334155 !important;
+  }
+  [data-testid="stMarkdownContainer"] th,
+  [data-testid="stMarkdownContainer"] td {
+    padding: 0.45rem 0.75rem 0.45rem 0 !important;
+    text-align: left !important;
+    vertical-align: top !important;
+    overflow-wrap: anywhere !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(3) {
+    width: 24% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(3) + * {
+    width: 28% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(3) + * + * {
+    width: 48% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(4) {
+    width: 10% !important;
+    white-space: nowrap !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(4) + * {
+    width: 40% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(4) + * + * {
+    width: 30% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(4) + * + * + * {
+    width: 20% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(5) {
+    width: 14% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(5) + * {
+    width: 28% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(5) + * + * {
+    width: 18% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(5) + * + * + * {
+    width: 14% !important;
+  }
+  [data-testid="stMarkdownContainer"] tr > :first-child:nth-last-child(5) + * + * + * + * {
+    width: 26% !important;
   }
   [data-testid="stMarkdownContainer"] h1,
   [data-testid="stMarkdownContainer"] h2,
@@ -650,7 +770,12 @@ def render_agent_cards(
 
 def render_tab_description(text: str) -> None:
     """Render a one-line explainer at the top of a tab."""
-    st.caption(text)
+    st.markdown(f'<p class="tab-description">{html.escape(text)}</p>', unsafe_allow_html=True)
+
+
+def render_form_hint(text: str) -> None:
+    """Render helper copy in a darker, inline style."""
+    st.markdown(f'<p class="form-hint">{html.escape(text)}</p>', unsafe_allow_html=True)
 
 
 def count_nfrs(nfr_text: str) -> int:
@@ -782,23 +907,30 @@ def render_priority_heatmap(score_text: str) -> None:
     st.markdown("".join(html_parts), unsafe_allow_html=True)
 
 
-def render_redaction_preview(
-    title: str,
-    result: RedactionResult,
-    key: str,
-    height: int = 140,
-) -> None:
-    """Render a compact preview of sanitized input."""
-    with st.expander(title, expanded=False):
-        st.caption(summarize_redaction(result))
-        st.text_area(
-            f"{title} text",
-            value=result.redacted_text,
-            height=height,
-            key=key,
-            disabled=True,
-            label_visibility="collapsed",
+def render_redaction_summary(label: str, result: RedactionResult) -> None:
+    """Render an always-visible redaction status line."""
+    summary_class = "changed" if result.changed else "unchanged"
+    label_prefix = ""
+    if label:
+        label_prefix = f'<span class="redaction-summary-label">{html.escape(label)}:</span> '
+    item_descriptions = describe_redaction_items(result)
+    item_markup = ""
+    if item_descriptions:
+        item_markup = "<ul class=\"redaction-summary-list\">"
+        item_markup += "".join(
+            f"<li>{html.escape(description)}</li>"
+            for description in item_descriptions
         )
+        item_markup += "</ul>"
+    st.markdown(
+        (
+            f'<div class="redaction-summary {summary_class}">'
+            f"{label_prefix}{html.escape(summarize_redaction(result))}"
+            f"{item_markup}"
+            "</div>"
+        ),
+        unsafe_allow_html=True,
+    )
 
 
 def record_usage(agent_key: str, label: str, result) -> None:
@@ -1490,11 +1622,7 @@ def render_refinement_panel(mode: str) -> None:
                 disabled=True,
             )
 
-    st.checkbox(
-        "Redact sensitive data before sending to OpenAI",
-        key="redaction_enabled",
-        help="Masks emails, URLs, domains, IPs, UUIDs, and secret-like values before model calls.",
-    )
+    render_form_hint("Potential sensitive values are checked automatically and the masked version is used when rerunning.")
 
     additional_context = st.text_area(
         "Additional context",
@@ -1507,23 +1635,21 @@ def render_refinement_panel(mode: str) -> None:
     )
 
     redacted_context_result = None
-    if st.session_state.redaction_enabled and additional_context.strip():
+    if additional_context.strip():
         redacted_context_result = redact_text(additional_context.strip())
-        render_redaction_preview(
-            "Preview redacted additional context",
-            redacted_context_result,
-            f"{mode}_refinement_redaction_preview",
-            height=140,
-        )
+        render_redaction_summary("Additional context", redacted_context_result)
 
     button_label = "Refine Loaded Run" if st.session_state.result_source == "loaded" else "Rerun With More Context"
-    if st.button(button_label, type="primary", use_container_width=True, key=f"{mode}_refine_run"):
+    _, button_col = st.columns([5, 1.6])
+    with button_col:
+        rerun_clicked = st.button(button_label, type="primary", use_container_width=True, key=f"{mode}_refine_run")
+    if rerun_clicked:
         if not additional_context.strip():
             st.warning("Add some extra context before rerunning.")
             return
 
         processed_additional_context = additional_context.strip()
-        if st.session_state.redaction_enabled and redacted_context_result is not None:
+        if redacted_context_result is not None:
             processed_additional_context = redacted_context_result.redacted_text
 
         refined_description = combine_refinement_context(
@@ -1560,8 +1686,6 @@ if "existing_nfrs" not in st.session_state:
     st.session_state.existing_nfrs = ""
 if "pipeline_complete" not in st.session_state:
     st.session_state.pipeline_complete = False
-if "redaction_enabled" not in st.session_state:
-    st.session_state.redaction_enabled = True
 if "usage_stats" not in st.session_state:
     st.session_state.usage_stats = {}
 if "save_status" not in st.session_state:
@@ -1649,12 +1773,8 @@ if st.session_state.mode == "generate":
 
     if not st.session_state.pipeline_complete:
         st.markdown("#### Describe your system")
-        st.caption("Include: system type, scale, users, integrations, platform, and known constraints. No client names or sensitive data needed.")
-        redaction_enabled = st.checkbox(
-            "Redact sensitive data before sending to OpenAI",
-            key="redaction_enabled",
-            help="Masks emails, URLs, domains, IPs, UUIDs, and secret-like values before model calls.",
-        )
+        render_form_hint("Include: system type, scale, users, integrations, platform, and known constraints. No client names or sensitive data needed.")
+        render_form_hint("Potential sensitive values are checked automatically and the masked version is sent to OpenAI.")
 
         system_description = st.text_area(
             "System description",
@@ -1663,14 +1783,9 @@ if st.session_state.mode == "generate":
             label_visibility="collapsed",
         )
         redacted_system_result = None
-        if redaction_enabled and system_description.strip():
+        if system_description.strip():
             redacted_system_result = redact_text(system_description.strip())
-            render_redaction_preview(
-                "Preview redacted system description",
-                redacted_system_result,
-                "generate_redaction_preview",
-                height=180,
-            )
+            render_redaction_summary("System description", redacted_system_result)
 
         _, btn_col = st.columns([4, 1])
         with btn_col:
@@ -1678,7 +1793,7 @@ if st.session_state.mode == "generate":
 
         if run and system_description.strip():
             processed_system_description = system_description.strip()
-            if redaction_enabled and redacted_system_result is not None:
+            if redacted_system_result is not None:
                 processed_system_description = redacted_system_result.redacted_text
 
             run_generate_pipeline(processed_system_description, result_source="fresh")
@@ -1888,11 +2003,7 @@ elif st.session_state.mode == "validate":
 
     if not st.session_state.pipeline_complete:
         col_left, col_right = st.columns(2)
-        redaction_enabled = st.checkbox(
-            "Redact sensitive data before sending to OpenAI",
-            key="redaction_enabled",
-            help="Masks emails, URLs, domains, IPs, UUIDs, and secret-like values before model calls.",
-        )
+        render_form_hint("Potential sensitive values are checked automatically and the masked version is sent to OpenAI.")
         with col_left:
             st.markdown("#### System description")
             system_description = st.text_area(
@@ -1916,39 +2027,22 @@ elif st.session_state.mode == "validate":
 
         redacted_system_result = None
         redacted_nfrs_result = None
-        if redaction_enabled and system_description.strip():
+        if system_description.strip():
             redacted_system_result = redact_text(system_description.strip())
-        if redaction_enabled and existing_nfrs.strip():
+        if existing_nfrs.strip():
             redacted_nfrs_result = redact_text(existing_nfrs.strip())
-        if redaction_enabled and (redacted_system_result or redacted_nfrs_result):
-            with st.expander("Preview redacted inputs", expanded=False):
-                if redacted_system_result is not None:
-                    st.caption(f"System description: {summarize_redaction(redacted_system_result)}")
-                    st.text_area(
-                        "Redacted system description",
-                        value=redacted_system_result.redacted_text,
-                        height=150,
-                        key="validate_redaction_system_preview",
-                        disabled=True,
-                        label_visibility="collapsed",
-                    )
-                if redacted_nfrs_result is not None:
-                    st.caption(f"Existing NFRs: {summarize_redaction(redacted_nfrs_result)}")
-                    st.text_area(
-                        "Redacted existing NFRs",
-                        value=redacted_nfrs_result.redacted_text,
-                        height=180,
-                        key="validate_redaction_nfr_preview",
-                        disabled=True,
-                        label_visibility="collapsed",
-                    )
+        if redacted_system_result or redacted_nfrs_result:
+            if redacted_system_result is not None:
+                render_redaction_summary("System description", redacted_system_result)
+            if redacted_nfrs_result is not None:
+                render_redaction_summary("Existing NFRs", redacted_nfrs_result)
 
         if run and system_description.strip() and existing_nfrs.strip():
             processed_system_description = system_description.strip()
             processed_existing_nfrs = existing_nfrs.strip()
-            if redaction_enabled and redacted_system_result is not None:
+            if redacted_system_result is not None:
                 processed_system_description = redacted_system_result.redacted_text
-            if redaction_enabled and redacted_nfrs_result is not None:
+            if redacted_nfrs_result is not None:
                 processed_existing_nfrs = redacted_nfrs_result.redacted_text
 
             run_validate_pipeline(
