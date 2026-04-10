@@ -1,42 +1,42 @@
 # NFR Studio
 
-NFR Studio is a Streamlit application for generating, validating, and improving non-functional requirements (NFRs) using an AI-assisted workflow.
+NFR Studio generates, validates, and improves non-functional requirements (NFRs) using an AI-assisted workflow.
 
-It supports both greenfield analysis from a system description and review of existing NFR sets, then layers on prioritisation, test criteria, conflict analysis, remediation, and compliance mapping.
+The repository currently supports two local app paths:
+
+- `app.py`: the original Streamlit UI
+- `backend/` + `frontend/`: the newer FastAPI + React UI
+
+Both paths use the same core agent prompts and saved-run model.
 
 ## Features
 
 - Generate a structured NFR pack from a plain-English system description.
 - Validate an existing NFR set against a supplied system description.
-- Run a multi-step analysis workflow covering:
-  - gap clarification
-  - NFR generation or validation
-  - priority scoring
-  - test acceptance criteria
-  - conflict detection
-  - remediation suggestions
-  - compliance mapping
-- Save runs locally and reload them from the sidebar.
-- Refine a loaded run by adding more context and rerunning as a new version.
-- Ask grounded follow-up questions about the current run in the `Ask` tab.
-- Download the full pack or individual output sections as Markdown.
-- Optionally redact common sensitive values before sending content to OpenAI.
+- Run a multi-step analysis workflow covering clarification, NFR generation or validation, prioritisation, test criteria, conflicts, remediation, and compliance mapping.
+- Add supporting attachments such as PDFs, notes, and architecture diagrams to enrich the analysis context.
+- Preview redaction and mask common sensitive values before model submission.
+- Save runs locally, reload them later, and refine them with additional context.
+- Ask grounded follow-up questions about the current run.
+- Download the full pack or individual sections as Markdown.
 
 ## Project Structure
 
-- `app.py`: main Streamlit UI and workflow orchestration.
-- `agents/nfr_agent.py`: OpenAI-backed agent prompts and helper functions.
-- `utils/redaction.py`: input redaction helpers.
-- `saved_runs/`: local saved output packs.
-- `AGENTS.md`: project-specific agent guidance.
-- `requirements.txt`: Python dependencies.
-- `.env`: local environment variables.
+- `app.py`: Streamlit UI
+- `backend/`: FastAPI API for the React app
+- `frontend/`: React + Tailwind UI
+- `agents/nfr_agent.py`: OpenAI-backed prompts and agent helpers
+- `utils/redaction.py`: redaction helpers
+- `utils/attachments.py`: attachment extraction helpers
+- `saved_runs/`: local saved output packs
+- `AGENTS.md`: project-specific agent guidance
 
 ## Requirements
 
 - Python
-- A virtual environment for local dependencies
-- An OpenAI API key in `.env`
+- A virtual environment for Python dependencies
+- Node.js and npm for the React frontend
+- An `OPENAI_API_KEY` in `.env`
 
 Example `.env`:
 
@@ -48,13 +48,7 @@ Do not commit `.env` or any other sensitive credentials.
 
 ## Getting Started
 
-1. Create a virtual environment if you do not already have one.
-2. Activate the virtual environment.
-3. Install dependencies from `requirements.txt`.
-4. Add your `OPENAI_API_KEY` to `.env`.
-5. Start the Streamlit app.
-
-### Windows (Git Bash)
+### Option 1: Streamlit
 
 ```bash
 python -m venv venv
@@ -63,61 +57,49 @@ python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
 
-## How To Use
+### Option 2: React + FastAPI
 
-### Generate Mode
+Start the API from the repo root:
 
-Use `Generate NFR Pack` when you have a system description and want the application to produce a full NFR pack.
+```bash
+python -m venv venv
+source venv/Scripts/activate
+python -m pip install -r backend/requirements.txt
+uvicorn backend.main:app --reload
+```
 
-Outputs include:
+Start the frontend from `frontend/`:
 
-- clarification of missing context and assumptions
-- generated NFRs by category
-- priority matrix
-- test acceptance criteria
-- conflicts and trade-offs
-- remediation suggestions
-- compliance mapping
+```bash
+npm install
+npm run dev
+```
 
-### Validate Mode
+By default the frontend calls `http://localhost:8000`. Override with `VITE_API_BASE_URL` if needed.
 
-Use `Validate Existing NFRs` when you already have an NFR set and want the application to review it.
+## React UI Coverage
 
-Outputs include:
+- Generate and validate flows
+- Live agent status via background job polling
+- Attachment processing and attachment warnings
+- Redaction previews and server-side masking
+- Saved run list, load, save, and project grouping
+- Refine and rerun with additional context
+- Grounded follow-up chat
+- Markdown downloads
+- Generate-mode visual summaries
+- Validate-mode insight summaries
+- Usage summary cards
 
-- coverage and gap analysis
-- vague or non-measurable NFR identification
-- remediation guidance
-- compliance mapping
+## Saved Runs
 
-## Saved Runs And Refinement
-
-- Runs can be saved locally as Markdown packs.
-- Saved runs appear in the sidebar and can be reloaded later.
-- Loaded runs can be refined by adding more context in `Add More Context`.
+- Runs are saved locally as Markdown packs in `saved_runs/`.
+- Sidebar grouping is driven by the `Project` field on the run.
+- If no project is set, the run is grouped under `No Project`.
 - Refinement creates a new run version rather than overwriting the original.
-
-## Ask Tab
-
-Each completed run includes an `Ask` tab where you can ask grounded follow-up questions about the outputs currently on screen.
-
-Examples:
-
-- Which NFRs matter most for MVP?
-- What should I clarify with stakeholders next?
-- Rewrite the security NFRs more tightly.
-
-## Downloads
-
-The application currently supports Markdown downloads for:
-
-- the full pack
-- individual analysis sections
-
-Additional export options, such as Excel, can be added by extending the Python backend and Streamlit UI.
 
 ## Notes
 
 - `saved_runs/` is intended for local run output and is ignored by git.
-- `.env` is also ignored by git and should stay local.
-- The application is built in Streamlit, so UI and backend changes are made in Python.
+- `.env` should stay local.
+- The Streamlit app remains available as a fallback while the React UI continues to evolve.

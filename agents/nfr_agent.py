@@ -3,6 +3,7 @@ agents/nfr_agent.py - NFR Studio Agents
 Expanded agent set for generation, validation, remediation, and compliance mapping.
 """
 
+import base64
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -355,6 +356,36 @@ NFR_FOLLOW_UP_PROMPT = """You are an expert Non-Functional Requirements (NFR) as
 """
 
 
+ATTACHMENT_SUMMARY_PROMPT = """You are a Senior Enterprise Architect reviewing a supporting attachment for an NFR assessment.
+
+Summarise only the information that is useful for downstream non-functional analysis.
+
+## Focus areas
+- architecture and component boundaries
+- integrations, data flows, and dependencies
+- scale, performance, resilience, and availability clues
+- security, compliance, and operational signals
+- uncertainties, assumptions, and missing context
+
+## Rules
+- do not invent details that are not visible or stated
+- if the attachment is a diagram, describe the visible structure and likely interactions
+- if the source content is partial or truncated, say so
+- keep the output concise and practical for architects
+
+## Output format
+
+### Attachment Summary
+2-4 bullet points covering the most relevant architectural information.
+
+### NFR-Relevant Signals
+Bullet points listing the NFR implications or constraints this attachment suggests.
+
+### Uncertainties
+Bullet points listing what remains unclear, inferred, or missing.
+"""
+
+
 # â”€â”€ Shared API call helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _normalise_usage(usage: Any) -> dict[str, int]:
@@ -402,6 +433,23 @@ def _call_openai(system_prompt: str, user_content: str, max_tokens: int = 2000) 
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content}
         ]
+    )
+    return AgentRunResult(
+        content=response.choices[0].message.content,
+        usage=_normalise_usage(getattr(response, "usage", None)),
+        model=MODEL_NAME,
+    )
+
+
+def _call_openai_parts(system_prompt: str, user_parts: list[dict[str, Any]], max_tokens: int = 2000) -> AgentRunResult:
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    response = client.chat.completions.create(
+        model=MODEL_NAME,
+        max_tokens=max_tokens,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_parts},
+        ],
     )
     return AgentRunResult(
         content=response.choices[0].message.content,
@@ -536,4 +584,54 @@ def answer_nfr_question(
 {question}
 """,
         max_tokens=1400,
+    )
+
+
+def summarize_supporting_attachment(
+    filename: str,
+    media_type: str,
+    *,
+    text_content: str | None = None,
+    image_bytes: bytes | None = None,
+    truncated: bool = False,
+    extraction_note: str = "",
+) -> AgentRunResult:
+    """Summarise a supporting attachment into concise NFR-relevant context."""
+    truncated_note = "Yes" if truncated else "No"
+    note_text = extraction_note or "Analysed as a supporting attachment."
+
+    if image_bytes is not None:
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        return _call_openai_parts(
+            ATTACHMENT_SUMMARY_PROMPT,
+            [
+                {
+                    "type": "text",
+                    "text": (
+                        f"Filename: {filename}\n"
+                        f"Media type: {media_type}\n"
+                        f"Extraction note: {note_text}\n"
+                        f"Content truncated: {truncated_note}\n\n"
+                        "Summarise this attachment for downstream NFR analysis."
+                    ),
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{encoded}"},
+                },
+            ],
+            max_tokens=900,
+        )
+
+    return _call_openai(
+        ATTACHMENT_SUMMARY_PROMPT,
+        f"""Filename: {filename}
+Media type: {media_type}
+Extraction note: {note_text}
+Content truncated: {truncated_note}
+
+## Attachment Content
+{text_content or ""}
+""",
+        max_tokens=900,
     )
