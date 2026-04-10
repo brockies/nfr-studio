@@ -1,5 +1,7 @@
 # Local environment
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 env/
