@@ -98,6 +98,12 @@ By default the frontend calls `http://localhost:8000`. Override with `VITE_API_B
 - If no project is set, the run is grouped under `No Project`.
 - Refinement creates a new run version rather than overwriting the original.
 
+## Security Guardrails
+
+- Local secret files such as `.env` and `.env.*` are ignored by git.
+- Generated run output in `saved_runs/` is ignored by git.
+- GitHub Actions runs a Gitleaks secret scan on pushes, pull requests, and manual workflow runs.
+
 ## Notes
 
 - `saved_runs/` is intended for local run output and is ignored by git.
