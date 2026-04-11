@@ -12,6 +12,41 @@ type Section = {
   content: string;
 };
 
+function formatKnowledgeBaseContent(run: RunPayload): string {
+  const sources = run.rag_sources ?? [];
+  if (!sources.length) {
+    return "No knowledge base sources were retrieved for this run.";
+  }
+
+  const projectIds = Array.from(new Set(sources.map((item) => item.project_id).filter(Boolean))).sort();
+  const lines: string[] = [
+    "## Knowledge Base Retrieval",
+    "",
+    `Based on insights from: ${projectIds.join(", ")}`,
+    "",
+    "### Retrieved Chunks",
+    "",
+  ];
+
+  for (const source of sources) {
+    lines.push(`#### ${source.project_id || "unknown_project"} (score: ${source.score.toFixed(3)})`);
+    if (source.industry) lines.push(`- Industry: ${source.industry}`);
+    if (source.tech_stack) lines.push(`- Tech stack: ${source.tech_stack}`);
+    if (source.scale) lines.push(`- Scale: ${source.scale}`);
+    if (source.lessons) lines.push(`- Lessons: ${source.lessons}`);
+    if (source.source_path) lines.push(`- File: \`${source.source_path}\``);
+    lines.push("");
+    if (source.snippet) {
+      lines.push("```");
+      lines.push(source.snippet.trim());
+      lines.push("```");
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n").trim();
+}
+
 const CLARIFICATION_HEADINGS = new Set([
   "Gap Clarification Analysis",
   "Known Context",
@@ -62,7 +97,7 @@ function formatClarificationContent(content: string): string {
 
 function sectionGroups(mode: Mode, run: RunPayload): Section[] {
   if (mode === "generate") {
-    return [
+    const sections: Section[] = [
       {
         key: "clarify",
         label: "Clarification",
@@ -75,6 +110,12 @@ function sectionGroups(mode: Mode, run: RunPayload): Section[] {
       { key: "remediate", label: "Remediation", content: run.results.remediate ?? "" },
       { key: "compliance", label: "Compliance", content: run.results.compliance ?? "" }
     ];
+
+    if (run.rag_sources?.length) {
+      sections.splice(2, 0, { key: "kb", label: "Knowledge Base", content: formatKnowledgeBaseContent(run) });
+    }
+
+    return sections;
   }
 
   return [
@@ -93,6 +134,10 @@ export function RunTabs({ run }: { run: RunPayload }) {
   const sections = useMemo(() => sectionGroups(run.mode, run), [run]);
   const [activeTab, setActiveTab] = useState(sections[0]?.key ?? "");
   const activeSection = sections.find((item) => item.key === activeTab) ?? sections[0];
+  const ragProjectIds = useMemo(() => {
+    const sources = run.rag_sources ?? [];
+    return Array.from(new Set(sources.map((item) => item.project_id).filter(Boolean))).sort();
+  }, [run.rag_sources]);
 
   return (
     <Card>
@@ -112,6 +157,12 @@ export function RunTabs({ run }: { run: RunPayload }) {
         <CardTitle>{activeSection.label}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
+        {activeSection.key === "nfr" && ragProjectIds.length ? (
+          <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+            <span className="font-semibold text-slate-900">Based on insights from:</span>{" "}
+            {ragProjectIds.join(", ")}
+          </div>
+        ) : null}
         <MarkdownPanel content={activeSection.content} />
         <div className="flex flex-wrap gap-3">
           <Button

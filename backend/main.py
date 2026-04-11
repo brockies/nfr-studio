@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
+from pathlib import Path
+import os
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -36,6 +38,9 @@ from .pipeline import (
 )
 from .storage import list_saved_runs, load_saved_run, save_run_file
 from utils.redaction import redact_text
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
+from utils.rag_manager import ingest_knowledge_base, kb_status
 
 
 app = FastAPI(
@@ -63,6 +68,47 @@ def healthcheck() -> dict[str, str]:
     """Simple readiness endpoint for local development."""
 
     return {"status": "ok"}
+
+
+@app.get("/api/kb/status")
+def knowledge_base_status() -> dict[str, object]:
+    """Return basic knowledge base and vector index status."""
+
+    return kb_status()
+
+
+@app.post("/api/kb/ingest")
+def ingest_knowledge_base_now() -> dict[str, object]:
+    """(Re)ingest the knowledge base into the local ChromaDB store."""
+
+    return ingest_knowledge_base()
+
+
+@app.post("/api/kb/upload")
+async def upload_knowledge_base_project(
+    project_file: UploadFile = File(...),
+    target: str = Form("projects"),
+) -> dict[str, object]:
+    """Upload a markdown knowledge base file and re-ingest.
+
+    `target` should be "projects" or "compliance".
+    """
+
+    if not project_file.filename or not project_file.filename.lower().endswith(".md"):
+        raise HTTPException(status_code=400, detail="Please upload a .md file.")
+
+    safe_target = "projects" if target not in {"projects", "compliance"} else target
+    dest_dir = Path("knowledge_base") / safe_target
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    payload = await project_file.read()
+    if not payload:
+        raise HTTPException(status_code=400, detail="Uploaded file was empty.")
+
+    dest_path = dest_dir / Path(project_file.filename).name
+    dest_path.write_bytes(payload)
+
+    return ingest_knowledge_base()
 
 
 async def _run_generate_job(

@@ -40,3 +40,9 @@ Thumbs.db
 
 # Project-generated output
 saved_runs/
+
+# Local vector store
+.chroma/
+
+# Derived KB index metadata
+knowledge_base/index.json

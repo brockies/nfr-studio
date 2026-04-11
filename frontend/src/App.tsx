@@ -20,6 +20,7 @@ import {
 
 import { FollowUpChat } from "@/components/follow-up-chat";
 import { AttachmentList } from "@/components/attachment-list";
+import { KnowledgeBaseAdmin } from "@/components/knowledge-base-admin";
 import { PipelineProgress } from "@/components/pipeline-progress";
 import { RedactionSummary } from "@/components/redaction-summary";
 import { RefinementPanel } from "@/components/refinement-panel";
@@ -383,17 +384,19 @@ export default function App() {
 
   return (
     <div className="mx-auto flex min-h-screen max-w-[1600px] gap-5 px-4 py-5 lg:px-6">
-      <aside className="hidden w-[360px] shrink-0 lg:block xl:w-[380px]">
-        <div className="glass-panel sticky top-6 h-[calc(100vh-3rem)] overflow-y-auto rounded-[32px] border border-white/70 p-5 shadow-panel">
-          <div className="mb-6 shrink-0">
-            <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
-              <Sparkles className="h-6 w-6" />
-            </div>
-            <h1 className="mt-4 text-2xl font-semibold tracking-tight">NFR Studio</h1>
-            <p className="mt-2 max-w-[18rem] text-sm leading-6 text-muted-foreground">
-              {MODE_SUBTITLE[mode]}
-            </p>
-          </div>
+	      <aside className="hidden w-[360px] shrink-0 lg:block xl:w-[380px]">
+	        <div className="glass-panel sticky top-6 h-[calc(100vh-3rem)] overflow-y-auto rounded-[32px] border border-white/70 p-5 shadow-panel">
+	          <div className="mb-6 shrink-0">
+	            <div className="flex items-center gap-3">
+	              <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
+	                <Sparkles className="h-6 w-6" />
+	              </div>
+	              <h1 className="text-2xl font-semibold tracking-tight">NFR Studio</h1>
+	            </div>
+	            <p className="mt-2 max-w-[18rem] text-sm leading-6 text-muted-foreground">
+	              {MODE_SUBTITLE[mode]}
+	            </p>
+	          </div>
 
           <div className="shrink-0 space-y-3">
             <Button
@@ -621,6 +624,15 @@ export default function App() {
                   Clear inputs
                 </Button>
               </div>
+
+              <details className="rounded-[24px] border border-slate-200 bg-white/70 px-4 py-3">
+                <summary className="cursor-pointer select-none text-sm font-semibold text-slate-900">
+                  Admin: Knowledge Base
+                </summary>
+                <div className="mt-4">
+                  <KnowledgeBaseAdmin />
+                </div>
+              </details>
             </CardContent>
           </Card>
 

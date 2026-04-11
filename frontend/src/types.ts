@@ -34,6 +34,18 @@ export type RunPayload = {
   };
   warnings: string[];
   pack_markdown: string;
+  rag_sources: {
+    project_id: string;
+    project_type: string;
+    industry: string;
+    tech_stack: string;
+    scale: string;
+    lessons: string;
+    source_path: string;
+    chunk_index: number;
+    score: number;
+    snippet: string;
+  }[];
 };
 
 export type SavedRunSummary = {

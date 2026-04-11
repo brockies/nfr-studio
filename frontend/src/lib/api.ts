@@ -111,3 +111,34 @@ export async function fetchRunJob(jobId: string) {
   const response = await fetch(`${API_BASE}/api/jobs/${encodeURIComponent(jobId)}`);
   return parseResponse<RunJobStatus>(response);
 }
+
+export type KnowledgeBaseStatus = {
+  indexed?: boolean;
+  chunk_count?: number;
+  file_count?: number;
+  reason?: string;
+  provider?: string;
+  collection?: string;
+  persist_dir?: string;
+};
+
+export async function fetchKnowledgeBaseStatus() {
+  const response = await fetch(`${API_BASE}/api/kb/status`);
+  return parseResponse<KnowledgeBaseStatus>(response);
+}
+
+export async function ingestKnowledgeBase() {
+  const response = await fetch(`${API_BASE}/api/kb/ingest`, { method: "POST" });
+  return parseResponse<KnowledgeBaseStatus>(response);
+}
+
+export async function uploadKnowledgeBaseFile(input: { file: File; target: "projects" | "compliance" }) {
+  const formData = new FormData();
+  formData.append("project_file", input.file);
+  formData.append("target", input.target);
+  const response = await fetch(`${API_BASE}/api/kb/upload`, {
+    method: "POST",
+    body: formData
+  });
+  return parseResponse<KnowledgeBaseStatus>(response);
+}

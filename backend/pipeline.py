@@ -24,9 +24,10 @@ from agents.nfr_agent import (
     validate_nfrs,
 )
 from utils.attachments import extract_uploaded_attachment
+from utils.rag_manager import RagUnavailable, format_retrieved_context, retrieve
 from utils.redaction import describe_redaction_items, redact_text, summarize_redaction
 
-from .models import ChatMessage, RedactionPreview, RunPayload, UsageStat
+from .models import ChatMessage, RagSource, RedactionPreview, RunPayload, UsageStat
 from .storage import hydrate_pack
 
 
@@ -282,13 +283,44 @@ def run_generate_pipeline_sync(
         run.system_description,
         run.attachment_context,
     )
+
+    rag_hits = []
+    rag_context = ""
+    try:
+        # RAG retrieval runs once and its context is reused for all downstream agents.
+        rag_hits = retrieve(combined_system_description, top_k=5)
+        rag_context = format_retrieved_context(rag_hits)
+        run.rag_sources = [
+            RagSource(
+                project_id=str(hit.metadata.get("project_id", "")),
+                project_type=str(hit.metadata.get("project_type", "")),
+                industry=str(hit.metadata.get("industry", "")),
+                tech_stack=str(hit.metadata.get("tech_stack", "")),
+                scale=str(hit.metadata.get("scale", "")),
+                lessons=str(hit.metadata.get("lessons", "")),
+                source_path=str(hit.metadata.get("source_path", "")),
+                chunk_index=int(hit.metadata.get("chunk_index", 0) or 0),
+                score=float(hit.score),
+                snippet=(hit.document[:420].rstrip() + "…") if len(hit.document) > 420 else hit.document,
+            )
+            for hit in rag_hits
+        ]
+    except RagUnavailable:
+        # No-op: RAG is an enhancement layer.
+        rag_context = ""
+    except Exception:
+        rag_context = ""
+
     run.agent_states = build_agent_states("generate")
     run.usage_stats.update(attachment_usage)
     emit_progress(run, on_progress)
 
     run.agent_states["clarify"] = "running"
     emit_progress(run, on_progress)
-    clarify_run = clarify_gaps(combined_system_description)
+    clarify_input = combined_system_description
+    if rag_context:
+        clarify_input = f"{clarify_input}\n\n{rag_context}"
+    clarify_run = clarify_gaps(clarify_input)
     run.results["clarify"] = clarify_run.content
     record_usage(run.usage_stats, "clarify", "Gap Clarification Agent", clarify_run)
     run.agent_states["clarify"] = "done"
@@ -303,7 +335,7 @@ def run_generate_pipeline_sync(
 {run.results["clarify"]}
 
 Use the source description as the primary input. Treat the clarification analysis as working assumptions and open questions."""
-    nfr_run = generate_nfrs(nfr_input)
+    nfr_run = generate_nfrs(nfr_input, retrieved_context=rag_context)
     run.results["nfr"] = nfr_run.content
     record_usage(run.usage_stats, "nfr", "NFR Generation Agent", nfr_run)
     run.agent_states["nfr"] = "done"

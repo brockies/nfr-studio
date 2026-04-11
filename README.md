@@ -28,6 +28,10 @@ Both paths use the same core agent prompts and saved-run model.
 - `agents/nfr_agent.py`: OpenAI-backed prompts and agent helpers
 - `utils/redaction.py`: redaction helpers
 - `utils/attachments.py`: attachment extraction helpers
+- `utils/chunking.py`: knowledge base chunking helpers (RAG)
+- `utils/rag_manager.py`: embed/ingest/retrieve manager (RAG)
+- `scripts/ingest_knowledge_base.py`: CLI to index the knowledge base (RAG)
+- `knowledge_base/`: markdown knowledge base (projects + compliance) (RAG)
 - `saved_runs/`: local saved output packs
 - `AGENTS.md`: project-specific agent guidance
 
@@ -52,7 +56,8 @@ Do not commit `.env` or any other sensitive credentials.
 
 ```bash
 python -m venv venv
-source venv/Scripts/activate
+source venv/bin/activate
+# Windows (PowerShell): venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
@@ -63,9 +68,10 @@ Start the API from the repo root:
 
 ```bash
 python -m venv venv
-source venv/Scripts/activate
+source venv/bin/activate
+# Windows (PowerShell): venv\Scripts\Activate.ps1
 python -m pip install -r backend/requirements.txt
-uvicorn backend.main:app --reload
+python -m uvicorn backend.main:app --reload
 ```
 
 Start the frontend from `frontend/`:
@@ -76,6 +82,66 @@ npm run dev
 ```
 
 By default the frontend calls `http://localhost:8000`. Override with `VITE_API_BASE_URL` if needed.
+
+## RAG Knowledge Base (MVP)
+
+NFR Studio can optionally retrieve insights from past retail/ecom projects stored under `knowledge_base/`.
+
+### Knowledge Base Layout
+
+- `knowledge_base/projects/*.md`: past project NFRs / learnings
+- `knowledge_base/compliance/*.md`: lightweight compliance notes / checklists
+
+Each project file supports YAML frontmatter, for example:
+
+```md
+---
+project_id: "retail_fashion_001"
+industry: "fashion_ecommerce"
+tech_stack: ["shopify_plus", "headless"]
+scale: "100k_orders_month"
+lessons: ["image_cdn_critical", "black_friday_50x_load"]
+---
+```
+
+### Indexing (ChromaDB)
+
+The vector store persists locally to `.chroma/` (gitignored).
+
+During ingestion, documents are chunked to roughly 500-1000 tokens per chunk (estimated) and stored with metadata such as:
+`project_type`, `industry`, `tech_stack`, `nfr_category`, and `lesson_learned` (derived from frontmatter/heuristics for MVP).
+
+You can ingest in any of these ways:
+
+1) CLI:
+
+```bash
+python scripts/ingest_knowledge_base.py
+```
+
+2) React UI:
+
+Open the **Admin: Knowledge Base** expander and use **Upload + Reindex** or **Reindex Existing Files**.
+
+3) API endpoints (for tooling/automation):
+
+- `GET /api/kb/status`
+- `POST /api/kb/ingest`
+- `POST /api/kb/upload` (multipart: `project_file`, `target=projects|compliance`)
+
+### Retrieval + Provenance
+
+- During **Generate** runs, the backend retrieves the top 5 relevant knowledge base chunks (semantic search with a lightweight keyword overlap rerank) and injects them into the NFR generation prompt.
+- The UI shows a "Based on insights from: Project X, Y, Z" banner and a **Knowledge Base** tab with retrieved snippets.
+- The NFR generator prompt asks the model to cite relevant `project_id` values in a "Based on insights from" column when a retrieved source influenced an NFR.
+
+### Embeddings Configuration
+
+- Default: OpenAI embeddings (`text-embedding-3-small`) to match the existing OpenAI integration.
+- Override OpenAI embedding model with `RAG_OPENAI_MODEL` if needed.
+- Optional local mode:
+  - Set `RAG_EMBEDDINGS_PROVIDER=local`
+  - Optionally set `RAG_LOCAL_MODEL=sentence-transformers/all-MiniLM-L6-v2`
 
 ## React UI Coverage
 

@@ -34,6 +34,21 @@ class RunCounts(BaseModel):
     agents_run: int = 0
 
 
+class RagSource(BaseModel):
+    """One retrieved knowledge base chunk used as context for a run."""
+
+    project_id: str = ""
+    project_type: str = ""
+    industry: str = ""
+    tech_stack: str = ""
+    scale: str = ""
+    lessons: str = ""
+    source_path: str = ""
+    chunk_index: int = 0
+    score: float = 0.0
+    snippet: str = ""
+
+
 class RunPayload(BaseModel):
     """Complete generate or validate run returned by the API."""
 
@@ -49,6 +64,7 @@ class RunPayload(BaseModel):
     counts: RunCounts = Field(default_factory=RunCounts)
     warnings: list[str] = Field(default_factory=list)
     pack_markdown: str = ""
+    rag_sources: list[RagSource] = Field(default_factory=list)
 
 
 class SavedRunSummary(BaseModel):

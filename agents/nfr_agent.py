@@ -69,6 +69,8 @@ Your task is to analyse a system description and produce a comprehensive, struct
 - Number each NFR sequentially across all categories: NFR-01, NFR-02 etc.
 - If the system description lacks detail needed to define an NFR precisely, flag it
 - Do not invent constraints not implied by the description
+- If "Retrieved Knowledge Base Insights" are provided, use them as optional reference patterns and lessons learned.
+- When a knowledge base source directly influenced an NFR, cite the relevant `project_id` in the output.
 
 ## Categories to cover where relevant:
 1. Performance & Scalability
@@ -91,9 +93,9 @@ Brief 2-3 sentence restatement confirming your understanding.
 
 #### [Category Name]
 
-| ID | Requirement | Rationale | Target |
-|----|-------------|-----------|--------|
-| NFR-01 | Requirement statement | Why this applies | Measurable target |
+| ID | Requirement | Rationale | Target | Based on insights from |
+|----|-------------|-----------|--------|------------------------|
+| NFR-01 | Requirement statement | Why this applies | Measurable target | retail_fashion_001 |
 
 [Repeat for each relevant category]
 
@@ -460,12 +462,14 @@ def _call_openai_parts(system_prompt: str, user_parts: list[dict[str, Any]], max
 
 # â”€â”€ Public agent functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-def generate_nfrs(system_description: str) -> AgentRunResult:
-    """Agent 1: Generate NFRs from a system description."""
-    return _call_openai(
-        NFR_GENERATION_PROMPT,
-        f"Please generate NFRs for the following system:\n\n{system_description}"
-    )
+def generate_nfrs(system_description: str, *, retrieved_context: str = "") -> AgentRunResult:
+    """Agent 1: Generate NFRs from a system description, optionally augmented with retrieved context."""
+
+    user_content = f"Please generate NFRs for the following system:\n\n{system_description}"
+    if retrieved_context.strip():
+        user_content = f"{user_content}\n\n{retrieved_context.strip()}"
+
+    return _call_openai(NFR_GENERATION_PROMPT, user_content)
 
 
 def clarify_gaps(system_description: str) -> AgentRunResult:
