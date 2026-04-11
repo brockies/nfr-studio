@@ -58,7 +58,7 @@ Do not commit `.env` or any other sensitive credentials.
 python -m venv venv
 source venv/bin/activate
 # Windows (PowerShell): venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
+python -m pip install -r requirements-streamlit.txt
 python -m streamlit run app.py
 ```
 
@@ -150,6 +150,7 @@ Open the **Admin: Knowledge Base** expander and use **Upload + Reindex** or **Re
 - Optional local mode:
   - Set `RAG_EMBEDDINGS_PROVIDER=local`
   - Optionally set `RAG_LOCAL_MODEL=sentence-transformers/all-MiniLM-L6-v2`
+  - Install local embedding deps: `python -m pip install -r requirements-local-embeddings.txt`
 
 ### Chunking
 
