@@ -83,6 +83,14 @@ npm run dev
 
 By default the frontend calls `http://localhost:8000`. Override with `VITE_API_BASE_URL` if needed.
 
+### One-Command Demo Run
+
+You can start the backend + frontend with:
+
+```bash
+bash scripts/run_demo.sh
+```
+
 ## RAG Knowledge Base (MVP)
 
 NFR Studio can optionally retrieve insights from past retail/ecom projects stored under `knowledge_base/`.
