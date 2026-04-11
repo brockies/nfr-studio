@@ -6,26 +6,46 @@ cd "$ROOT_DIR"
 
 BACKEND_PORT="${BACKEND_PORT:-8000}"
 FRONTEND_PORT="${FRONTEND_PORT:-5173}"
+PYTHON_BIN="${PYTHON_BIN:-}"
 
 echo "NFR Studio demo runner"
 echo "Repo: $ROOT_DIR"
 
+if [[ -z "${PYTHON_BIN}" ]]; then
+  if command -v python3.12 >/dev/null 2>&1; then
+    PYTHON_BIN="python3.12"
+  else
+    PYTHON_BIN="python3"
+  fi
+fi
+
+PY_VERSION="$(${PYTHON_BIN} -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "")"
+if [[ "${PY_VERSION}" != "3.12" ]]; then
+  echo "Warning: Recommended Python is 3.12. Detected: ${PY_VERSION:-unknown} (${PYTHON_BIN})."
+  echo "On macOS (Homebrew): brew install python@3.12"
+fi
+
 if [[ ! -d "venv" ]]; then
   echo "Creating venv..."
-  python3 -m venv venv
+  "${PYTHON_BIN}" -m venv venv
 fi
 
 source venv/bin/activate
 
-python - <<'PY' || {
-  echo "Installing backend dependencies..."
-  python -m pip install -r backend/requirements.txt
-}
+check_python_deps() {
+  python - <<'PY'
 import fastapi, uvicorn  # noqa: F401
 import chromadb  # noqa: F401
 import tiktoken  # noqa: F401
 print("Python deps OK")
 PY
+}
+
+if ! check_python_deps >/dev/null 2>&1; then
+  echo "Installing backend dependencies..."
+  python -m pip install -r backend/requirements.txt
+  check_python_deps
+fi
 
 if [[ -f ".env" ]]; then
   if ! rg -n "^OPENAI_API_KEY=" .env >/dev/null 2>&1; then
@@ -81,4 +101,3 @@ echo ""
 echo "Press Ctrl+C to stop."
 
 wait
-

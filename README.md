@@ -37,10 +37,16 @@ Both paths use the same core agent prompts and saved-run model.
 
 ## Requirements
 
-- Python
+- Python (recommended: 3.12 for best dependency/wheel support)
 - A virtual environment for Python dependencies
 - Node.js and npm for the React frontend
 - An `OPENAI_API_KEY` in `.env`
+
+On macOS (Homebrew), you can install Python 3.12 with:
+
+```bash
+brew install python@3.12
+```
 
 Example `.env`:
 
