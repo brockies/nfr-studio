@@ -143,6 +143,10 @@ Open the **Admin: Knowledge Base** expander and use **Upload + Reindex** or **Re
   - Set `RAG_EMBEDDINGS_PROVIDER=local`
   - Optionally set `RAG_LOCAL_MODEL=sentence-transformers/all-MiniLM-L6-v2`
 
+### Chunking
+
+Chunking uses LangChain's text splitters. If `tiktoken` is installed, chunk sizes/overlap are token-based; otherwise they fall back to a character-based approximation.
+
 ## React UI Coverage
 
 - Generate and validate flows
