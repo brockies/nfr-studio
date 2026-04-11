@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
@@ -24,10 +25,10 @@ from agents.nfr_agent import (
     validate_nfrs,
 )
 from utils.attachments import extract_uploaded_attachment
-from utils.rag_manager import RagUnavailable, format_retrieved_context, retrieve
+from utils.rag_manager import RagUnavailable, format_retrieved_context, kb_status, retrieve
 from utils.redaction import describe_redaction_items, redact_text, summarize_redaction
 
-from .models import ChatMessage, RagSource, RedactionPreview, RunPayload, UsageStat
+from .models import ChatMessage, RagSource, RagStatus, RedactionPreview, RunPayload, UsageStat
 from .storage import hydrate_pack
 
 
@@ -286,30 +287,57 @@ def run_generate_pipeline_sync(
 
     rag_hits = []
     rag_context = ""
+    provider = os.getenv("RAG_EMBEDDINGS_PROVIDER", "openai").lower()
+    enabled = os.getenv("RAG_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
+    kb = kb_status()
+    indexed = bool(kb.get("indexed")) and int(kb.get("chunk_count") or 0) > 0 and int(kb.get("file_count") or 0) > 0
+    run.rag_status = RagStatus(
+        enabled=enabled,
+        indexed=indexed,
+        file_count=int(kb.get("file_count") or 0),
+        chunk_count=int(kb.get("chunk_count") or 0),
+        provider=str(kb.get("provider") or provider),
+        message=str(kb.get("reason") or ""),
+    )
+
     try:
-        # RAG retrieval runs once and its context is reused for all downstream agents.
-        rag_hits = retrieve(combined_system_description, top_k=5)
-        rag_context = format_retrieved_context(rag_hits)
-        run.rag_sources = [
-            RagSource(
-                project_id=str(hit.metadata.get("project_id", "")),
-                project_type=str(hit.metadata.get("project_type", "")),
-                industry=str(hit.metadata.get("industry", "")),
-                tech_stack=str(hit.metadata.get("tech_stack", "")),
-                scale=str(hit.metadata.get("scale", "")),
-                lessons=str(hit.metadata.get("lessons", "")),
-                source_path=str(hit.metadata.get("source_path", "")),
-                chunk_index=int(hit.metadata.get("chunk_index", 0) or 0),
-                score=float(hit.score),
-                snippet=(hit.document[:420].rstrip() + "…") if len(hit.document) > 420 else hit.document,
-            )
-            for hit in rag_hits
-        ]
+        if not enabled:
+            run.rag_status.message = "Knowledge base retrieval is disabled (RAG_ENABLED=false)."
+        elif not indexed:
+            if run.rag_status.file_count == 0:
+                run.rag_status.message = "No knowledge base files found under knowledge_base/."
+            else:
+                run.rag_status.message = "Knowledge base not indexed yet. Ingest it via Admin: Knowledge Base or scripts/ingest_knowledge_base.py."
+        elif provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+            run.rag_status.message = "OPENAI_API_KEY is missing, so knowledge base retrieval is unavailable."
+        else:
+            # RAG retrieval runs once and its context is reused for all downstream agents.
+            rag_hits = retrieve(combined_system_description, top_k=5)
+            rag_context = format_retrieved_context(rag_hits)
+            run.rag_sources = [
+                RagSource(
+                    project_id=str(hit.metadata.get("project_id", "")),
+                    project_type=str(hit.metadata.get("project_type", "")),
+                    industry=str(hit.metadata.get("industry", "")),
+                    tech_stack=str(hit.metadata.get("tech_stack", "")),
+                    scale=str(hit.metadata.get("scale", "")),
+                    lessons=str(hit.metadata.get("lessons", "")),
+                    source_path=str(hit.metadata.get("source_path", "")),
+                    chunk_index=int(hit.metadata.get("chunk_index", 0) or 0),
+                    score=float(hit.score),
+                    snippet=(hit.document[:420].rstrip() + "…") if len(hit.document) > 420 else hit.document,
+                )
+                for hit in rag_hits
+            ]
+            if run.rag_sources:
+                run.rag_status.message = ""
     except RagUnavailable:
         # No-op: RAG is an enhancement layer.
         rag_context = ""
+        run.rag_status.message = run.rag_status.message or "ChromaDB is not installed, so knowledge base retrieval is unavailable."
     except Exception:
         rag_context = ""
+        run.rag_status.message = run.rag_status.message or "Knowledge base retrieval failed (continuing without it)."
 
     run.agent_states = build_agent_states("generate")
     run.usage_stats.update(attachment_usage)

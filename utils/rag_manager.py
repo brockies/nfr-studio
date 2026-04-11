@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
@@ -27,6 +28,9 @@ from .chunking import chunk_markdown
 KB_ROOT = Path("knowledge_base")
 DEFAULT_CHROMA_DIR = Path(".chroma")
 DEFAULT_COLLECTION = "nfr_kb"
+
+_EMBED_CACHE: dict[str, list[float]] = {}
+_RETRIEVE_CACHE: dict[str, tuple[float, list["RagHit"]]] = {}
 
 
 EmbedProvider = Literal["openai", "local"]
@@ -412,8 +416,38 @@ def retrieve(
         # Auto-ingest for local dev convenience.
         ingest_knowledge_base(kb_root=kb_root, persist_dir=persist_dir, collection_name=collection_name, provider=provider)
 
+    provider_name = provider or os.getenv("RAG_EMBEDDINGS_PROVIDER", "openai")
+    collection_count = int(collection.count())
+    cache_ttl = int(os.getenv("RAG_CACHE_TTL_SECONDS", "600") or 600)
+    query_key = _hash_id(
+        "retrieve",
+        provider_name,
+        os.getenv("RAG_OPENAI_MODEL", "text-embedding-3-small"),
+        os.getenv("RAG_LOCAL_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
+        collection_name,
+        str(collection_count),
+        str(top_k),
+        query,
+    )
+
+    now = time.time()
+    cached = _RETRIEVE_CACHE.get(query_key)
+    if cached and (now - cached[0]) < cache_ttl:
+        return cached[1]
+
     embedder = get_embedder(provider)
-    query_embedding = embedder.embed([query])[0]
+    embed_key = _hash_id(
+        "embed",
+        provider_name,
+        os.getenv("RAG_OPENAI_MODEL", "text-embedding-3-small"),
+        os.getenv("RAG_LOCAL_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
+        query,
+    )
+    if embed_key in _EMBED_CACHE:
+        query_embedding = _EMBED_CACHE[embed_key]
+    else:
+        query_embedding = embedder.embed([query])[0]
+        _EMBED_CACHE[embed_key] = query_embedding
 
     # Pull more candidates than needed, then rerank with a lexical signal.
     candidate_k = max(12, top_k * 4)
@@ -443,7 +477,9 @@ def retrieve(
         )
 
     hits = _hybrid_rerank(query, hits)
-    return hits[:top_k]
+    final_hits = hits[:top_k]
+    _RETRIEVE_CACHE[query_key] = (now, final_hits)
+    return final_hits
 
 
 def format_retrieved_context(hits: list[RagHit]) -> str:

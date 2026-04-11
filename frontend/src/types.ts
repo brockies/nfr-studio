@@ -46,6 +46,14 @@ export type RunPayload = {
     score: number;
     snippet: string;
   }[];
+  rag_status: {
+    enabled: boolean;
+    indexed: boolean;
+    file_count: number;
+    chunk_count: number;
+    provider: string;
+    message: string;
+  };
 };
 
 export type SavedRunSummary = {

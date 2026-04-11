@@ -149,20 +149,33 @@ export function RunTabs({ run }: { run: RunPayload }) {
         <CardTitle>{activeSection.label}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        {activeSection.key === "nfr" && ragProjectIds.length ? (
+        {activeSection.key === "nfr" ? (
           <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            <div>
-              <span className="font-semibold text-slate-900">Based on insights from:</span>{" "}
-              {ragProjectIds.join(", ")}
-            </div>
-            <details className="mt-2">
-              <summary className="cursor-pointer select-none text-sm font-semibold text-slate-900">
-                View retrieved sources
-              </summary>
-              <div className="mt-3">
-                <MarkdownPanel content={formatKnowledgeBaseContent(run)} />
-              </div>
-            </details>
+            {ragProjectIds.length ? (
+              <>
+                <div>
+                  <span className="font-semibold text-slate-900">Based on insights from:</span>{" "}
+                  {ragProjectIds.join(", ")}
+                </div>
+                <details className="mt-2">
+                  <summary className="cursor-pointer select-none text-sm font-semibold text-slate-900">
+                    View retrieved sources
+                  </summary>
+                  <div className="mt-3">
+                    <MarkdownPanel content={formatKnowledgeBaseContent(run)} />
+                  </div>
+                </details>
+              </>
+            ) : (
+              <>
+                <div className="font-semibold text-slate-900">Knowledge Base</div>
+                <div className="mt-1 text-sm text-slate-700">
+                  {run.rag_status?.message
+                    ? run.rag_status.message
+                    : "No knowledge base sources were retrieved for this run."}
+                </div>
+              </>
+            )}
           </div>
         ) : null}
         <MarkdownPanel content={activeSection.content} />

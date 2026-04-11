@@ -61,7 +61,10 @@ from chromadb import PersistentClient
 c = PersistentClient(path=".chroma")
 try:
     col = c.get_collection("nfr_kb")
-    print(f"KB: collection=nfr_kb chunks={col.count()}")
+    count = col.count()
+    print(f"KB: collection=nfr_kb chunks={count}")
+    if count == 0:
+        print("KB: not indexed yet (run `python scripts/ingest_knowledge_base.py` or use Admin: Knowledge Base).")
 except Exception:
     print("KB: collection nfr_kb not found yet (ingest via `python scripts/ingest_knowledge_base.py`).")
 PY

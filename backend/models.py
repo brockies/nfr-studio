@@ -49,6 +49,17 @@ class RagSource(BaseModel):
     snippet: str = ""
 
 
+class RagStatus(BaseModel):
+    """Current RAG availability/health for a run."""
+
+    enabled: bool = True
+    indexed: bool = False
+    file_count: int = 0
+    chunk_count: int = 0
+    provider: str = "openai"
+    message: str = ""
+
+
 class RunPayload(BaseModel):
     """Complete generate or validate run returned by the API."""
 
@@ -65,6 +76,7 @@ class RunPayload(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     pack_markdown: str = ""
     rag_sources: list[RagSource] = Field(default_factory=list)
+    rag_status: RagStatus = Field(default_factory=RagStatus)
 
 
 class SavedRunSummary(BaseModel):
