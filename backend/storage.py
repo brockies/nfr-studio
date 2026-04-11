@@ -96,14 +96,20 @@ def build_generate_pack(run: RunPayload) -> str:
 {run.attachment_context.strip()}
 """
 
-    kb_section = ""
+    nfr_section = run.results.get("nfr", "")
     if getattr(run, "rag_sources", None):
         project_ids = sorted({item.project_id for item in run.rag_sources if item.project_id})
         if project_ids:
-            kb_section = f"""
-## Knowledge Base Insights
-Based on insights from: {", ".join(project_ids)}
-"""
+            sources = "\n".join(
+                f"- {item.project_id} ({item.source_path})"
+                for item in run.rag_sources
+                if item.project_id and item.source_path
+            )
+            nfr_section = f"""> Based on insights from: {", ".join(project_ids)}
+
+{sources}
+
+{nfr_section}"""
 
     return f"""# NFR Pack
 Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}
@@ -112,7 +118,6 @@ Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}
 
 ## System Description
 {run.system_description}
-{kb_section}
 
 ---
 
@@ -120,7 +125,7 @@ Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}
 
 ---
 
-{run.results.get("nfr", "")}
+{nfr_section}
 
 ---
 

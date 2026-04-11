@@ -20,11 +20,7 @@ function formatKnowledgeBaseContent(run: RunPayload): string {
 
   const projectIds = Array.from(new Set(sources.map((item) => item.project_id).filter(Boolean))).sort();
   const lines: string[] = [
-    "## Knowledge Base Retrieval",
-    "",
-    `Based on insights from: ${projectIds.join(", ")}`,
-    "",
-    "### Retrieved Chunks",
+    "### Retrieved Knowledge Base Sources",
     "",
   ];
 
@@ -111,10 +107,6 @@ function sectionGroups(mode: Mode, run: RunPayload): Section[] {
       { key: "compliance", label: "Compliance", content: run.results.compliance ?? "" }
     ];
 
-    if (run.rag_sources?.length) {
-      sections.splice(2, 0, { key: "kb", label: "Knowledge Base", content: formatKnowledgeBaseContent(run) });
-    }
-
     return sections;
   }
 
@@ -159,8 +151,18 @@ export function RunTabs({ run }: { run: RunPayload }) {
       <CardContent className="space-y-6">
         {activeSection.key === "nfr" && ragProjectIds.length ? (
           <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            <span className="font-semibold text-slate-900">Based on insights from:</span>{" "}
-            {ragProjectIds.join(", ")}
+            <div>
+              <span className="font-semibold text-slate-900">Based on insights from:</span>{" "}
+              {ragProjectIds.join(", ")}
+            </div>
+            <details className="mt-2">
+              <summary className="cursor-pointer select-none text-sm font-semibold text-slate-900">
+                View retrieved sources
+              </summary>
+              <div className="mt-3">
+                <MarkdownPanel content={formatKnowledgeBaseContent(run)} />
+              </div>
+            </details>
           </div>
         ) : null}
         <MarkdownPanel content={activeSection.content} />
