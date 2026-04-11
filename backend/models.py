@@ -60,6 +60,19 @@ class RagStatus(BaseModel):
     message: str = ""
 
 
+class KnowledgeBaseFile(BaseModel):
+    target: str = ""
+    filename: str = ""
+    relative_path: str = ""
+    project_id: str = ""
+    industry: str = ""
+    tech_stack: list[str] = Field(default_factory=list)
+    scale: str = ""
+    lessons: list[str] = Field(default_factory=list)
+    modified: int = 0
+    bytes: int = 0
+
+
 class RunPayload(BaseModel):
     """Complete generate or validate run returned by the API."""
 

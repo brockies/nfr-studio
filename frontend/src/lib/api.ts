@@ -143,6 +143,19 @@ export type KnowledgeBaseStatus = {
   persist_dir?: string;
 };
 
+export type KnowledgeBaseFile = {
+  target: "projects" | "compliance" | string;
+  filename: string;
+  relative_path: string;
+  project_id: string;
+  industry: string;
+  tech_stack: string[];
+  scale: string;
+  lessons: string[];
+  modified: number;
+  bytes: number;
+};
+
 export async function fetchKnowledgeBaseStatus() {
   const response = await safeFetch(`${API_BASE}/api/kb/status`);
   return parseResponse<KnowledgeBaseStatus>(response);
@@ -162,4 +175,9 @@ export async function uploadKnowledgeBaseFile(input: { file: File; target: "proj
     body: formData
   });
   return parseResponse<KnowledgeBaseStatus>(response);
+}
+
+export async function fetchKnowledgeBaseFiles() {
+  const response = await safeFetch(`${API_BASE}/api/kb/files`);
+  return parseResponse<KnowledgeBaseFile[]>(response);
 }

@@ -14,13 +14,14 @@ import {
   FileCog,
   Files,
   LoaderCircle,
+  Library,
   ShieldCheck,
   Sparkles
 } from "lucide-react";
 
 import { FollowUpChat } from "@/components/follow-up-chat";
 import { AttachmentList } from "@/components/attachment-list";
-import { KnowledgeBaseAdmin } from "@/components/knowledge-base-admin";
+import { KnowledgeBasePage } from "@/components/knowledge-base-page";
 import { PipelineProgress } from "@/components/pipeline-progress";
 import { RedactionSummary } from "@/components/redaction-summary";
 import { RefinementPanel } from "@/components/refinement-panel";
@@ -96,6 +97,7 @@ function savedRunBadges(item: SavedRunSummary): string[] {
 }
 
 export default function App() {
+  const [activePage, setActivePage] = useState<"studio" | "kb">("studio");
   const [mode, setMode] = useState<Mode>("generate");
   const [projectName, setProjectName] = useState("");
   const [systemDescription, setSystemDescription] = useState("");
@@ -398,24 +400,38 @@ export default function App() {
 	            </p>
 	          </div>
 
-          <div className="shrink-0 space-y-3">
-            <Button
-              className="w-full justify-start"
-              variant={mode === "generate" ? "default" : "outline"}
-              onClick={() => setMode("generate")}
-            >
-              <Files className="mr-2 h-4 w-4" />
-              Generate NFR Pack
-            </Button>
-            <Button
-              className="w-full justify-start"
-              variant={mode === "validate" ? "default" : "outline"}
-              onClick={() => setMode("validate")}
-            >
-              <ShieldCheck className="mr-2 h-4 w-4" />
-              Validate Existing NFRs
-            </Button>
-          </div>
+	          <div className="shrink-0 space-y-3">
+	            <Button
+	              className="w-full justify-start"
+	              variant={activePage === "studio" && mode === "generate" ? "default" : "outline"}
+	              onClick={() => {
+	                setActivePage("studio");
+	                setMode("generate");
+	              }}
+	            >
+	              <Files className="mr-2 h-4 w-4" />
+	              Generate NFR Pack
+	            </Button>
+	            <Button
+	              className="w-full justify-start"
+	              variant={activePage === "studio" && mode === "validate" ? "default" : "outline"}
+	              onClick={() => {
+	                setActivePage("studio");
+	                setMode("validate");
+	              }}
+	            >
+	              <ShieldCheck className="mr-2 h-4 w-4" />
+	              Validate Existing NFRs
+	            </Button>
+	            <Button
+	              className="w-full justify-start"
+	              variant={activePage === "kb" ? "default" : "outline"}
+	              onClick={() => setActivePage("kb")}
+	            >
+	              <Library className="mr-2 h-4 w-4" />
+	              Knowledge Base
+	            </Button>
+	          </div>
 
           <Separator className="my-6" />
 
@@ -495,12 +511,17 @@ export default function App() {
         </div>
       </aside>
 
-      <main className="flex-1 space-y-4">
-        {error ? <div className="rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
-        {status ? <div className="rounded-[20px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{status}</div> : null}
+	      <main className="flex-1 space-y-4">
+	        {error ? <div className="rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+	        {status ? <div className="rounded-[20px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{status}</div> : null}
 
-        <div className={`grid gap-5 ${showRunSidebar ? "xl:grid-cols-[1.05fr_0.95fr]" : ""}`}>
-          <Card className="glass-panel">
+	        {activePage === "kb" ? (
+	          <KnowledgeBasePage onClose={() => setActivePage("studio")} />
+	        ) : null}
+
+	        {activePage === "studio" ? (
+	        <div className={`grid gap-5 ${showRunSidebar ? "xl:grid-cols-[1.05fr_0.95fr]" : ""}`}>
+	          <Card className="glass-panel">
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="space-y-2">
@@ -625,14 +646,6 @@ export default function App() {
                 </Button>
               </div>
 
-              <details className="rounded-[24px] border border-slate-200 bg-white/70 px-4 py-3">
-                <summary className="cursor-pointer select-none text-sm font-semibold text-slate-900">
-                  Admin: Knowledge Base
-                </summary>
-                <div className="mt-4">
-                  <KnowledgeBaseAdmin />
-                </div>
-              </details>
             </CardContent>
           </Card>
 
@@ -694,11 +707,12 @@ export default function App() {
 
               {usageTotals ? <UsageSummary totals={usageTotals} /> : null}
             </div>
-          ) : null}
-        </div>
+	          ) : null}
+	        </div>
+	        ) : null}
 
-        {run ? (
-          <>
+	        {run ? (
+	          <>
             {run.mode === "generate" ? (
               <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
                 <CategoryOverview items={categoryCounts} />

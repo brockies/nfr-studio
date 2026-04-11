@@ -14,6 +14,7 @@ from .jobs import complete_job, create_job, fail_job, get_job, update_job
 from .models import (
     FollowUpRequest,
     FollowUpResponse,
+    KnowledgeBaseFile,
     RedactionPreview,
     RedactionRequest,
     RefineRunRequest,
@@ -40,7 +41,7 @@ from .storage import list_saved_runs, load_saved_run, save_run_file
 from utils.redaction import redact_text
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
-from utils.rag_manager import ingest_knowledge_base, kb_status
+from utils.rag_manager import ingest_knowledge_base, kb_status, list_knowledge_base_files
 
 
 app = FastAPI(
@@ -82,6 +83,13 @@ def ingest_knowledge_base_now() -> dict[str, object]:
     """(Re)ingest the knowledge base into the local ChromaDB store."""
 
     return ingest_knowledge_base()
+
+
+@app.get("/api/kb/files", response_model=list[KnowledgeBaseFile])
+def list_kb_files() -> list[KnowledgeBaseFile]:
+    """List knowledge base markdown files and their metadata."""
+
+    return [KnowledgeBaseFile(**item) for item in list_knowledge_base_files()]
 
 
 @app.post("/api/kb/upload")

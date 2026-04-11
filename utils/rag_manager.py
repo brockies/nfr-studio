@@ -281,6 +281,51 @@ def knowledge_base_files(root: Path = KB_ROOT) -> list[Path]:
     return [*projects, *compliance]
 
 
+def list_knowledge_base_files(root: Path = KB_ROOT) -> list[dict[str, Any]]:
+    """Return a list of knowledge base markdown files with parsed frontmatter."""
+
+    items: list[dict[str, Any]] = []
+    for path in knowledge_base_files(root):
+        try:
+            raw = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        meta, _body = parse_frontmatter(raw)
+        stat = path.stat()
+
+        # Normalize fields we care about for UX.
+        tech_stack_value = meta.get("tech_stack") or []
+        if isinstance(tech_stack_value, str):
+            tech_stack: list[str] = [tech_stack_value]
+        else:
+            tech_stack = [str(item) for item in (tech_stack_value or []) if str(item).strip()]
+
+        lessons_value = meta.get("lessons") or []
+        if isinstance(lessons_value, str):
+            lessons: list[str] = [lessons_value]
+        else:
+            lessons = [str(item) for item in (lessons_value or []) if str(item).strip()]
+
+        items.append(
+            {
+                "target": path.parent.name,  # projects|compliance
+                "filename": path.name,
+                "relative_path": str(path.as_posix()),
+                "project_id": str(meta.get("project_id") or path.stem),
+                "industry": str(meta.get("industry") or ""),
+                "tech_stack": tech_stack,
+                "scale": str(meta.get("scale") or ""),
+                "lessons": lessons,
+                "modified": int(stat.st_mtime),
+                "bytes": int(stat.st_size),
+            }
+        )
+
+    items.sort(key=lambda item: (item["target"], item["project_id"]))
+    return items
+
+
 def ingest_knowledge_base(
     *,
     kb_root: Path = KB_ROOT,
