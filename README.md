@@ -97,6 +97,14 @@ You can start the backend + frontend with:
 bash scripts/run_demo.sh
 ```
 
+### Smoke Tests
+
+Run a small offline smoke test suite (no OpenAI calls) with:
+
+```bash
+bash scripts/run_smoke_tests.sh
+```
+
 ## RAG Knowledge Base (MVP)
 
 NFR Studio can optionally retrieve insights from past retail/ecom projects stored under `knowledge_base/`.
