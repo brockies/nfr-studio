@@ -385,8 +385,8 @@ export default function App() {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-[1600px] gap-5 px-4 py-5 lg:px-6">
-	      <aside className="hidden w-[360px] shrink-0 lg:block xl:w-[380px]">
+	    <div className="mx-auto flex min-h-screen max-w-[1760px] gap-5 px-4 py-5 lg:px-6">
+		      <aside className="hidden w-[320px] shrink-0 lg:block xl:w-[340px]">
 	        <div className="glass-panel sticky top-6 h-[calc(100vh-3rem)] overflow-y-auto rounded-[32px] border border-white/70 p-5 shadow-panel">
 	          <div className="mb-6 shrink-0">
 	            <div className="flex items-center gap-3">
@@ -520,7 +520,7 @@ export default function App() {
 	        ) : null}
 
 	        {activePage === "studio" ? (
-	        <div className={`grid gap-5 ${showRunSidebar ? "xl:grid-cols-[1.05fr_0.95fr]" : ""}`}>
+	        <div className={`grid gap-5 ${showRunSidebar ? "2xl:grid-cols-[1.05fr_0.95fr]" : ""}`}>
 	          <Card className="glass-panel">
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -713,8 +713,8 @@ export default function App() {
 
 	        {run ? (
 	          <>
-            {run.mode === "generate" ? (
-              <div className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+	            {run.mode === "generate" ? (
+	              <div className="grid gap-6 2xl:grid-cols-[0.95fr_1.05fr]">
                 <CategoryOverview items={categoryCounts} />
                 <PriorityHeatmap rows={priorityRows} />
               </div>
@@ -725,7 +725,7 @@ export default function App() {
 
             <RunTabs run={run} />
 
-            <div className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+	            <div className="grid gap-6 2xl:grid-cols-[0.9fr_1.1fr]">
               <div className="space-y-6">
                 <Card>
                   <CardHeader>
