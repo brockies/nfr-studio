@@ -427,7 +427,7 @@ export default function App() {
 	              <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
 	                <Sparkles className="h-6 w-6" />
 	              </div>
-	              <h1 className="text-2xl font-semibold tracking-tight">NFR Studio: Architecture Assurance</h1>
+	              <h1 className="text-2xl font-semibold tracking-tight">Architecture Assurance Studio</h1>
 	            </div>
 	            <p className="mt-2 max-w-[18rem] text-sm leading-6 text-muted-foreground">
 	              Define requirements, map controls, and plan the evidence you will need later.

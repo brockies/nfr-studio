@@ -20,20 +20,28 @@ type ComplianceInsights = {
   proofGapCount: number;
 };
 
+function isProjectScopedSource(source: RunPayload["rag_sources"][number]): boolean {
+  return source.project_type.trim().toLowerCase() === "project_attachment";
+}
+
+function sourceScopeLabel(source: RunPayload["rag_sources"][number]): string {
+  return isProjectScopedSource(source) ? "Project-specific attachment context" : "Shared knowledge base";
+}
+
 function formatKnowledgeBaseContent(run: RunPayload): string {
   const sources = run.rag_sources ?? [];
   if (!sources.length) {
-    return "No knowledge base sources were retrieved for this run.";
+    return "No retrieved context sources were found for this run.";
   }
 
-  const projectIds = Array.from(new Set(sources.map((item) => item.project_id).filter(Boolean))).sort();
   const lines: string[] = [
-    "### Retrieved Knowledge Base Sources",
+    "### Retrieved Context Sources",
     "",
   ];
 
   for (const source of sources) {
-    lines.push(`#### ${source.project_id || "unknown_project"} (score: ${source.score.toFixed(3)})`);
+    lines.push(`#### ${source.project_id || sourceScopeLabel(source)} (score: ${source.score.toFixed(3)})`);
+    lines.push(`- Scope: ${sourceScopeLabel(source)}`);
     if (source.industry) lines.push(`- Industry: ${source.industry}`);
     if (source.tech_stack) lines.push(`- Tech stack: ${source.tech_stack}`);
     if (source.scale) lines.push(`- Scale: ${source.scale}`);
@@ -214,9 +222,18 @@ export function RunTabs({ run }: { run: RunPayload }) {
   const sections = useMemo(() => sectionGroups(run.mode, run), [run]);
   const [activeTab, setActiveTab] = useState(sections[0]?.key ?? "");
   const activeSection = sections.find((item) => item.key === activeTab) ?? sections[0];
-  const ragProjectIds = useMemo(() => {
+  const ragSummary = useMemo(() => {
     const sources = run.rag_sources ?? [];
-    return Array.from(new Set(sources.map((item) => item.project_id).filter(Boolean))).sort();
+    const projectScopedCount = sources.filter(isProjectScopedSource).length;
+    const sharedCount = sources.length - projectScopedCount;
+    const projectIds = Array.from(new Set(sources.map((item) => item.project_id).filter(Boolean))).sort();
+
+    return {
+      totalCount: sources.length,
+      projectScopedCount,
+      sharedCount,
+      projectIds,
+    };
   }, [run.rag_sources]);
   const complianceInsights = useMemo(
     () => {
@@ -288,17 +305,30 @@ export function RunTabs({ run }: { run: RunPayload }) {
         <CardTitle>{activeSection.label}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        {activeSection.key === "nfr" ? (
+        {activeSection.key === "nfr" || activeSection.key === "validate" ? (
           <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
-            {ragProjectIds.length ? (
+            {ragSummary.totalCount ? (
               <>
-                <div>
-                  <span className="font-semibold text-slate-900">Based on insights from:</span>{" "}
-                  {ragProjectIds.join(", ")}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-slate-900">Retrieved context in use</span>
+                  {ragSummary.sharedCount ? (
+                    <Badge className="bg-sky-100 text-sky-800">{ragSummary.sharedCount} shared</Badge>
+                  ) : null}
+                  {ragSummary.projectScopedCount ? (
+                    <Badge className="bg-emerald-100 text-emerald-800">
+                      {ragSummary.projectScopedCount} project-specific
+                    </Badge>
+                  ) : null}
                 </div>
+                {ragSummary.projectIds.length ? (
+                  <div className="mt-1">
+                    <span className="font-semibold text-slate-900">Projects referenced:</span>{" "}
+                    {ragSummary.projectIds.join(", ")}
+                  </div>
+                ) : null}
                 <details className="mt-2">
                   <summary className="cursor-pointer select-none text-sm font-semibold text-slate-900">
-                    View retrieved sources
+                    View retrieved context sources
                   </summary>
                   <div className="mt-3">
                     <MarkdownPanel content={formatKnowledgeBaseContent(run)} />
@@ -311,7 +341,7 @@ export function RunTabs({ run }: { run: RunPayload }) {
                 <div className="mt-1 text-sm text-slate-700">
                   {run.rag_status?.message
                     ? run.rag_status.message
-                    : "No knowledge base sources were retrieved for this run."}
+                    : "No retrieved context sources were found for this run."}
                 </div>
               </>
             )}
@@ -450,7 +480,7 @@ export function RunTabs({ run }: { run: RunPayload }) {
                       {run.compliance_mappings.map((item, index) => (
                         <tr key={`${item.framework}-${item.control_theme}-${index}`} className="bg-white">
                           <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
-                            {item.framework || "—"}
+                            {item.framework || "-"}
                           </td>
                           <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
                             <Badge className={applicabilityBadgeClass(item.applicability)}>
@@ -458,19 +488,19 @@ export function RunTabs({ run }: { run: RunPayload }) {
                             </Badge>
                           </td>
                           <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
-                            {item.nfr_theme || "—"}
+                            {item.nfr_theme || "-"}
                           </td>
                           <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
-                            {item.control_theme || "—"}
+                            {item.control_theme || "-"}
                           </td>
                           <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
-                            {item.evidence_required || "—"}
+                            {item.evidence_required || "-"}
                           </td>
                           <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
-                            {item.suggested_owner || "—"}
+                            {item.suggested_owner || "-"}
                           </td>
                           <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
-                            {item.validation_approach || "—"}
+                            {item.validation_approach || "-"}
                           </td>
                         </tr>
                       ))}

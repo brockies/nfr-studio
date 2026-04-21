@@ -85,6 +85,44 @@ This system needs high availability and performance during seasonal peaks.
     assert hits[0].metadata.get("project_id") == "demo_001"
 
 
+def test_project_attachment_ingest_and_retrieve(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import utils.rag_manager as rag_manager
+
+    persist_dir = tmp_path / ".chroma"
+    rag_manager._EMBED_CACHE.clear()
+    rag_manager._RETRIEVE_CACHE.clear()
+    monkeypatch.setattr(rag_manager, "get_embedder", lambda provider=None: FakeEmbedder())
+
+    ingest_result = rag_manager.ingest_project_documents(
+        project_name="Acme Procurement",
+        documents=[
+            {
+                "source_name": "supplier_workflow.pdf",
+                "source_kind": "document",
+                "media_type": "application/pdf",
+                "source_path": "attachment::supplier_workflow.pdf",
+                "content": "Supplier proposals are uploaded, reviewed by legal, then approved before release.",
+            }
+        ],
+        persist_dir=persist_dir,
+        provider="openai",
+    )
+
+    hits = rag_manager.retrieve_project_documents(
+        "legal review supplier approval workflow",
+        project_name="Acme Procurement",
+        top_k=3,
+        persist_dir=persist_dir,
+        provider="openai",
+    )
+
+    assert ingest_result["indexed"] is True
+    assert ingest_result["collection"] == rag_manager.project_collection_name("Acme Procurement")
+    assert len(hits) > 0
+    assert hits[0].metadata.get("project_type") == "project_attachment"
+    assert hits[0].metadata.get("scope") == "project"
+
+
 def test_generate_endpoint_returns_run(monkeypatch: pytest.MonkeyPatch) -> None:
     # Avoid OpenAI calls by stubbing agent functions used by the pipeline.
     monkeypatch.setenv("RAG_ENABLED", "false")
@@ -180,6 +218,67 @@ Test system.
     assert "nfr" in payload["results"]
     assert isinstance(payload.get("rag_status"), dict)
     assert payload["counts"]["nfr_count"] >= 1
+
+
+def test_validate_pipeline_uses_retrieved_project_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAG_ENABLED", "true")
+    monkeypatch.setenv("OPENAI_API_KEY", "demo-key")
+
+    shared_hit = backend.pipeline.RagHit(
+        id="shared-1",
+        document="Shared control guidance for audit logging.",
+        metadata={
+            "project_id": "shared_ref",
+            "project_type": "compliance",
+            "source_path": "knowledge_base/compliance/shared.md",
+            "chunk_index": 0,
+            "scope": "shared",
+        },
+        score=0.9,
+    )
+    project_hit = backend.pipeline.RagHit(
+        id="project-1",
+        document="Project workflow includes legal review before approval.",
+        metadata={
+            "project_id": "Acme",
+            "project_type": "project_attachment",
+            "source_path": "attachment::workflow.pdf",
+            "chunk_index": 0,
+            "scope": "project",
+        },
+        score=0.95,
+    )
+
+    captured: dict[str, str] = {}
+
+    def _capture_clarify(content: str) -> AgentRunResult:
+        captured["clarify_input"] = content
+        return _agent("## Gap Clarification Analysis\n- ok")
+
+    def _capture_validate(content: str, _existing: str) -> AgentRunResult:
+        captured["validate_input"] = content
+        return _agent("## NFR Validation Report\n- ok")
+
+    monkeypatch.setattr(backend.pipeline, "kb_status", lambda: {"indexed": True, "chunk_count": 3, "file_count": 1, "provider": "openai"})
+    monkeypatch.setattr(backend.pipeline, "retrieve", lambda *_args, **_kwargs: [shared_hit])
+    monkeypatch.setattr(backend.pipeline, "retrieve_project_documents", lambda *_args, **_kwargs: [project_hit])
+    monkeypatch.setattr(backend.pipeline, "ingest_project_documents", lambda **_kwargs: {"indexed": True})
+    monkeypatch.setattr(backend.pipeline, "clarify_gaps", _capture_clarify)
+    monkeypatch.setattr(backend.pipeline, "validate_nfrs", _capture_validate)
+    monkeypatch.setattr(backend.pipeline, "remediate_nfrs", lambda *_: _agent("## Remediation Plan\n- ok"))
+    monkeypatch.setattr(backend.pipeline, "map_compliance", lambda *_: _agent("## Compliance Mapping\n- ok"))
+
+    run = backend.pipeline.run_validate_pipeline_sync(
+        system_description="Demo system",
+        existing_nfrs="NFR-01 demo",
+        project_name="Acme",
+        attachments=[],
+    )
+
+    assert "## Retrieved Context" in captured["clarify_input"]
+    assert "Project-specific attachments" in captured["clarify_input"]
+    assert "## Retrieved Context" in captured["validate_input"]
+    assert run.rag_sources[0].project_type in {"project_attachment", "compliance"}
 
 
 def test_compliance_prompt_includes_evidence_planning_sections() -> None:

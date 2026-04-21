@@ -26,7 +26,15 @@ from agents.nfr_agent import (
     validate_nfrs,
 )
 from utils.attachments import extract_uploaded_attachment
-from utils.rag_manager import RagUnavailable, format_retrieved_context, kb_status, retrieve
+from utils.rag_manager import (
+    RagHit,
+    RagUnavailable,
+    format_retrieved_context,
+    ingest_project_documents,
+    kb_status,
+    retrieve,
+    retrieve_project_documents,
+)
 from utils.redaction import describe_redaction_items, redact_text, summarize_redaction
 
 from .models import ChatMessage, RagSource, RagStatus, RedactionPreview, RunPayload, UsageStat
@@ -158,15 +166,16 @@ def build_redaction_preview(text: str) -> RedactionPreview:
 def process_supporting_attachments(
     uploaded_files: Sequence[InMemoryUpload] | None,
     mode: str,
-) -> tuple[str, dict[str, UsageStat], list[str]]:
+) -> tuple[str, dict[str, UsageStat], list[str], list[dict[str, str]]]:
     """Extract and summarize attachments for downstream NFR analysis."""
 
     if not uploaded_files:
-        return "", {}, []
+        return "", {}, [], []
 
     sections = ["## Supporting Attachments"]
     usage_stats: dict[str, UsageStat] = {}
     warnings: list[str] = []
+    rag_documents: list[dict[str, str]] = []
 
     for index, adapter in enumerate(uploaded_files, start=1):
         try:
@@ -178,6 +187,15 @@ def process_supporting_attachments(
                     image_bytes=extracted.binary_data,
                     truncated=extracted.truncated,
                     extraction_note=extracted.extraction_note,
+                )
+                rag_documents.append(
+                    {
+                        "source_name": extracted.name,
+                        "source_kind": extracted.kind,
+                        "media_type": extracted.media_type,
+                        "source_path": f"attachment::{extracted.name}",
+                        "content": f"Image attachment summary for {extracted.name}\n\n{summary_result.content.strip()}",
+                    }
                 )
             else:
                 redacted_result = redact_text(extracted.content_text)
@@ -192,6 +210,15 @@ def process_supporting_attachments(
                     text_content=redacted_result.redacted_text,
                     truncated=extracted.truncated,
                     extraction_note=extraction_note,
+                )
+                rag_documents.append(
+                    {
+                        "source_name": extracted.name,
+                        "source_kind": extracted.kind,
+                        "media_type": extracted.media_type,
+                        "source_path": f"attachment::{extracted.name}",
+                        "content": redacted_result.redacted_text,
+                    }
                 )
 
             notes = [f"- Type: `{extracted.media_type}`"]
@@ -216,8 +243,26 @@ def process_supporting_attachments(
             warnings.append(str(exc))
 
     if len(sections) == 1:
-        return "", usage_stats, warnings
-    return "\n\n".join(sections), usage_stats, warnings
+        return "", usage_stats, warnings, rag_documents
+    return "\n\n".join(sections), usage_stats, warnings, rag_documents
+
+
+def merge_rag_hits(*groups: Sequence[RagHit], top_k: int = 6) -> list[RagHit]:
+    """Merge multiple retrieval groups and keep the highest-value unique chunks."""
+
+    merged: list[RagHit] = []
+    seen: set[str] = set()
+
+    for hit in sorted((item for group in groups for item in group), key=lambda item: item.score, reverse=True):
+        dedupe_key = f"{hit.metadata.get('source_path', '')}::{hit.metadata.get('chunk_index', 0)}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        merged.append(hit)
+        if len(merged) >= top_k:
+            break
+
+    return merged
 
 
 def new_run(
@@ -262,7 +307,7 @@ def run_generate_pipeline_sync(
 ) -> RunPayload:
     """Execute the full generate pipeline."""
 
-    attachment_context_from_files, attachment_usage, warnings = process_supporting_attachments(
+    attachment_context_from_files, attachment_usage, warnings, attachment_rag_documents = process_supporting_attachments(
         attachments,
         "generate",
     )
@@ -303,18 +348,43 @@ def run_generate_pipeline_sync(
     )
 
     try:
+        if enabled and attachment_rag_documents and run.project_name.strip():
+            ingest_project_documents(
+                project_name=run.project_name,
+                documents=attachment_rag_documents,
+                provider=provider,
+            )
+
+        shared_hits: list[RagHit] = []
+        project_hits: list[RagHit] = []
+
         if not enabled:
             run.rag_status.message = "Knowledge base retrieval is disabled (RAG_ENABLED=false)."
-        elif not indexed:
-            if run.rag_status.file_count == 0:
-                run.rag_status.message = "No knowledge base files found under knowledge_base/."
-            else:
-                run.rag_status.message = "Knowledge base not indexed yet. Ingest it via Admin: Knowledge Base or scripts/ingest_knowledge_base.py."
-        elif provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-            run.rag_status.message = "OPENAI_API_KEY is missing, so knowledge base retrieval is unavailable."
         else:
-            # RAG retrieval runs once and its context is reused for all downstream agents.
-            rag_hits = retrieve(combined_system_description, top_k=5)
+            if indexed:
+                if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+                    run.rag_status.message = "OPENAI_API_KEY is missing, so knowledge base retrieval is unavailable."
+                else:
+                    shared_hits = retrieve(combined_system_description, top_k=4)
+            else:
+                if run.rag_status.file_count == 0:
+                    run.rag_status.message = "No knowledge base files found under knowledge_base/."
+                else:
+                    run.rag_status.message = "Knowledge base not indexed yet. Ingest it via Admin: Knowledge Base or scripts/ingest_knowledge_base.py."
+
+            if run.project_name.strip():
+                if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+                    if not run.rag_status.message:
+                        run.rag_status.message = "OPENAI_API_KEY is missing, so project retrieval is unavailable."
+                else:
+                    project_hits = retrieve_project_documents(
+                        combined_system_description,
+                        project_name=run.project_name,
+                        top_k=4,
+                        provider=provider,
+                    )
+
+            rag_hits = merge_rag_hits(shared_hits, project_hits, top_k=6)
             rag_context = format_retrieved_context(rag_hits)
             run.rag_sources = [
                 RagSource(
@@ -327,7 +397,7 @@ def run_generate_pipeline_sync(
                     source_path=str(hit.metadata.get("source_path", "")),
                     chunk_index=int(hit.metadata.get("chunk_index", 0) or 0),
                     score=float(hit.score),
-                    snippet=(hit.document[:420].rstrip() + "…") if len(hit.document) > 420 else hit.document,
+                    snippet=(hit.document[:420].rstrip() + "...") if len(hit.document) > 420 else hit.document,
                 )
                 for hit in rag_hits
             ]
@@ -460,7 +530,7 @@ def run_validate_pipeline_sync(
 ) -> RunPayload:
     """Execute the full validate pipeline."""
 
-    attachment_context_from_files, attachment_usage, warnings = process_supporting_attachments(
+    attachment_context_from_files, attachment_usage, warnings, attachment_rag_documents = process_supporting_attachments(
         attachments,
         "validate",
     )
@@ -485,13 +555,95 @@ def run_validate_pipeline_sync(
         run.system_description,
         run.attachment_context,
     )
+    rag_hits: list[RagHit] = []
+    rag_context = ""
+    provider = os.getenv("RAG_EMBEDDINGS_PROVIDER", "openai").lower()
+    enabled = os.getenv("RAG_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
+    kb = kb_status()
+    indexed = bool(kb.get("indexed")) and int(kb.get("chunk_count") or 0) > 0 and int(kb.get("file_count") or 0) > 0
+    run.rag_status = RagStatus(
+        enabled=enabled,
+        indexed=indexed,
+        file_count=int(kb.get("file_count") or 0),
+        chunk_count=int(kb.get("chunk_count") or 0),
+        provider=str(kb.get("provider") or provider),
+        message=str(kb.get("reason") or ""),
+    )
+    if enabled and attachment_rag_documents and run.project_name.strip():
+        try:
+            ingest_project_documents(
+                project_name=run.project_name,
+                documents=attachment_rag_documents,
+                provider=provider,
+            )
+        except Exception:
+            pass
+
+    try:
+        shared_hits: list[RagHit] = []
+        project_hits: list[RagHit] = []
+
+        if not enabled:
+            run.rag_status.message = "Knowledge base retrieval is disabled (RAG_ENABLED=false)."
+        else:
+            if indexed:
+                if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+                    run.rag_status.message = "OPENAI_API_KEY is missing, so knowledge base retrieval is unavailable."
+                else:
+                    shared_hits = retrieve(combined_system_description, top_k=4)
+            else:
+                if run.rag_status.file_count == 0:
+                    run.rag_status.message = "No knowledge base files found under knowledge_base/."
+                else:
+                    run.rag_status.message = "Knowledge base not indexed yet. Ingest it via Admin: Knowledge Base or scripts/ingest_knowledge_base.py."
+
+            if run.project_name.strip():
+                if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
+                    if not run.rag_status.message:
+                        run.rag_status.message = "OPENAI_API_KEY is missing, so project retrieval is unavailable."
+                else:
+                    project_hits = retrieve_project_documents(
+                        combined_system_description,
+                        project_name=run.project_name,
+                        top_k=4,
+                        provider=provider,
+                    )
+
+            rag_hits = merge_rag_hits(shared_hits, project_hits, top_k=6)
+            rag_context = format_retrieved_context(rag_hits)
+            run.rag_sources = [
+                RagSource(
+                    project_id=str(hit.metadata.get("project_id", "")),
+                    project_type=str(hit.metadata.get("project_type", "")),
+                    industry=str(hit.metadata.get("industry", "")),
+                    tech_stack=str(hit.metadata.get("tech_stack", "")),
+                    scale=str(hit.metadata.get("scale", "")),
+                    lessons=str(hit.metadata.get("lessons", "")),
+                    source_path=str(hit.metadata.get("source_path", "")),
+                    chunk_index=int(hit.metadata.get("chunk_index", 0) or 0),
+                    score=float(hit.score),
+                    snippet=(hit.document[:420].rstrip() + "...") if len(hit.document) > 420 else hit.document,
+                )
+                for hit in rag_hits
+            ]
+            if run.rag_sources:
+                run.rag_status.message = ""
+    except RagUnavailable:
+        rag_context = ""
+        run.rag_status.message = run.rag_status.message or "ChromaDB is not installed, so knowledge base retrieval is unavailable."
+    except Exception:
+        rag_context = ""
+        run.rag_status.message = run.rag_status.message or "Knowledge base retrieval failed (continuing without it)."
     run.agent_states = build_agent_states("validate")
     run.usage_stats.update(attachment_usage)
     emit_progress(run, on_progress)
 
     run.agent_states["clarify"] = "running"
     emit_progress(run, on_progress)
-    clarify_run = clarify_gaps(combined_system_description)
+    clarify_input = combined_system_description
+    if rag_context:
+        clarify_input = f"{clarify_input}\n\n{rag_context}"
+    clarify_run = clarify_gaps(clarify_input)
     run.results["clarify"] = clarify_run.content
     record_usage(run.usage_stats, "clarify", "Gap Clarification Agent", clarify_run)
     run.agent_states["clarify"] = "done"
@@ -504,6 +656,8 @@ def run_validate_pipeline_sync(
 
 ## Gap Clarification Analysis
 {run.results["clarify"]}
+
+{rag_context}
 """
     validation_run = validate_nfrs(validation_system_context, run.existing_nfrs)
     run.results["validate"] = validation_run.content

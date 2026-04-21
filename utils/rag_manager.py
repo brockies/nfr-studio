@@ -28,6 +28,7 @@ from .chunking import chunk_markdown
 KB_ROOT = Path("knowledge_base")
 DEFAULT_CHROMA_DIR = Path(".chroma")
 DEFAULT_COLLECTION = "nfr_kb"
+PROJECT_COLLECTION_PREFIX = "project_kb__"
 
 _EMBED_CACHE: dict[str, list[float]] = {}
 _RETRIEVE_CACHE: dict[str, tuple[float, list["RagHit"]]] = {}
@@ -275,6 +276,38 @@ def get_chroma_collection(
     return client.get_or_create_collection(name=collection_name)
 
 
+def sanitize_collection_slug(value: str) -> str:
+    """Return a deterministic, filesystem-safe collection suffix."""
+
+    cleaned = "".join(
+        char.lower() if char.isalnum() or char in {"-", "_"} else "_"
+        for char in value.strip()
+    )
+    while "__" in cleaned:
+        cleaned = cleaned.replace("__", "_")
+    return cleaned.strip("._") or "default"
+
+
+def project_collection_name(project_name: str) -> str:
+    """Return the Chroma collection name for a project-scoped corpus."""
+
+    return f"{PROJECT_COLLECTION_PREFIX}{sanitize_collection_slug(project_name)}"
+
+
+def collection_count(
+    *,
+    persist_dir: Path = DEFAULT_CHROMA_DIR,
+    collection_name: str = DEFAULT_COLLECTION,
+) -> int:
+    """Return the current document count for a collection, or zero if unavailable."""
+
+    try:
+        collection = get_chroma_collection(persist_dir=persist_dir, collection_name=collection_name)
+        return int(collection.count())
+    except Exception:
+        return 0
+
+
 def knowledge_base_files(root: Path = KB_ROOT) -> list[Path]:
     projects = sorted((root / "projects").glob("*.md"))
     compliance = sorted((root / "compliance").glob("*.md"))
@@ -412,6 +445,91 @@ def ingest_knowledge_base(
     return index_info
 
 
+def ingest_project_documents(
+    *,
+    project_name: str,
+    documents: list[dict[str, Any]],
+    persist_dir: Path = DEFAULT_CHROMA_DIR,
+    provider: EmbedProvider | None = None,
+    chunk_size_tokens: int = 800,
+    chunk_overlap_tokens: int = 120,
+) -> dict[str, Any]:
+    """Ingest project-scoped attachment content into its own Chroma collection."""
+
+    project_name = project_name.strip()
+    if not project_name:
+        return {"indexed": False, "reason": "Project name is required.", "chunk_count": 0}
+
+    collection_name = project_collection_name(project_name)
+    collection = get_chroma_collection(persist_dir=persist_dir, collection_name=collection_name)
+    embedder = get_embedder(provider)
+
+    ids: list[str] = []
+    texts: list[str] = []
+    metadatas: list[dict[str, Any]] = []
+
+    for document in documents:
+        content = str(document.get("content") or "").strip()
+        if not content:
+            continue
+
+        source_name = str(document.get("source_name") or "attachment").strip()
+        source_kind = str(document.get("source_kind") or "document").strip()
+        media_type = str(document.get("media_type") or "").strip()
+        source_path = str(document.get("source_path") or f"attachment::{source_name}").strip()
+
+        chunks = chunk_markdown(
+            content,
+            chunk_size_tokens=chunk_size_tokens,
+            chunk_overlap_tokens=chunk_overlap_tokens,
+        )
+
+        for chunk in chunks:
+            chunk_id = _hash_id(project_name, source_name, str(chunk.index))
+            ids.append(chunk_id)
+            texts.append(chunk.text)
+            metadatas.append(
+                {
+                    "project_id": project_name,
+                    "project_type": "project_attachment",
+                    "industry": "",
+                    "tech_stack": "",
+                    "scale": "",
+                    "lessons": "",
+                    "nfr_category": _infer_nfr_category(chunk.text),
+                    "lesson_learned": "",
+                    "source_path": source_path,
+                    "chunk_index": chunk.index,
+                    "source_name": source_name,
+                    "source_kind": source_kind,
+                    "media_type": media_type,
+                    "scope": "project",
+                }
+            )
+
+    if not ids:
+        return {"indexed": False, "reason": "No project documents contained usable text.", "chunk_count": 0}
+
+    embeddings = embedder.embed(texts)
+
+    try:
+        collection.delete(ids=ids)
+    except Exception:
+        pass
+
+    collection.add(ids=ids, documents=texts, metadatas=metadatas, embeddings=embeddings)
+
+    return {
+        "indexed": True,
+        "chunk_count": len(ids),
+        "file_count": len(documents),
+        "provider": provider or os.getenv("RAG_EMBEDDINGS_PROVIDER", "openai"),
+        "collection": collection_name,
+        "persist_dir": str(persist_dir),
+        "scope": "project",
+    }
+
+
 def kb_status(
     *,
     kb_root: Path = KB_ROOT,
@@ -456,13 +574,59 @@ def retrieve(
     if not (kb_root / "projects").exists():
         return []
 
-    collection = get_chroma_collection(persist_dir=persist_dir, collection_name=collection_name)
-    if collection.count() == 0:
+    if collection_count(persist_dir=persist_dir, collection_name=collection_name) == 0:
         # Auto-ingest for local dev convenience.
         ingest_knowledge_base(kb_root=kb_root, persist_dir=persist_dir, collection_name=collection_name, provider=provider)
 
+    return _retrieve_from_collection(
+        query,
+        top_k=top_k,
+        persist_dir=persist_dir,
+        collection_name=collection_name,
+        provider=provider,
+    )
+
+
+def retrieve_project_documents(
+    query: str,
+    *,
+    project_name: str,
+    top_k: int = 5,
+    persist_dir: Path = DEFAULT_CHROMA_DIR,
+    provider: EmbedProvider | None = None,
+) -> list[RagHit]:
+    """Retrieve relevant project-scoped attachment chunks for a query."""
+
+    project_name = project_name.strip()
+    if not project_name:
+        return []
+
+    collection_name = project_collection_name(project_name)
+    if collection_count(persist_dir=persist_dir, collection_name=collection_name) == 0:
+        return []
+
+    return _retrieve_from_collection(
+        query,
+        top_k=top_k,
+        persist_dir=persist_dir,
+        collection_name=collection_name,
+        provider=provider,
+    )
+
+
+def _retrieve_from_collection(
+    query: str,
+    *,
+    top_k: int,
+    persist_dir: Path,
+    collection_name: str,
+    provider: EmbedProvider | None,
+) -> list[RagHit]:
+    """Shared retrieval implementation for any Chroma collection."""
+
+    collection = get_chroma_collection(persist_dir=persist_dir, collection_name=collection_name)
     provider_name = provider or os.getenv("RAG_EMBEDDINGS_PROVIDER", "openai")
-    collection_count = int(collection.count())
+    collection_count_value = int(collection.count())
     cache_ttl = int(os.getenv("RAG_CACHE_TTL_SECONDS", "600") or 600)
     query_key = _hash_id(
         "retrieve",
@@ -470,7 +634,7 @@ def retrieve(
         os.getenv("RAG_OPENAI_MODEL", "text-embedding-3-small"),
         os.getenv("RAG_LOCAL_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
         collection_name,
-        str(collection_count),
+        str(collection_count_value),
         str(top_k),
         query,
     )
@@ -486,6 +650,7 @@ def retrieve(
         provider_name,
         os.getenv("RAG_OPENAI_MODEL", "text-embedding-3-small"),
         os.getenv("RAG_LOCAL_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
+        collection_name,
         query,
     )
     if embed_key in _EMBED_CACHE:
@@ -494,7 +659,6 @@ def retrieve(
         query_embedding = embedder.embed([query])[0]
         _EMBED_CACHE[embed_key] = query_embedding
 
-    # Pull more candidates than needed, then rerank with a lexical signal.
     candidate_k = max(12, top_k * 4)
     results = collection.query(
         query_embeddings=[query_embedding],
@@ -510,7 +674,6 @@ def retrieve(
     for idx, doc in enumerate(docs):
         meta = dict(metas[idx] or {})
         distance = float(distances[idx]) if idx < len(distances) and distances[idx] is not None else 0.0
-        # Distance is typically smaller-is-better; convert to a rough similarity-like score.
         score = 1.0 / (1.0 + distance)
         hits.append(
             RagHit(
@@ -534,8 +697,8 @@ def format_retrieved_context(hits: list[RagHit]) -> str:
         return ""
 
     lines: list[str] = [
-        "## Retrieved Knowledge Base Insights (Past Retail/Ecom Projects)",
-        "Use these as reference patterns and lessons learned. Do not copy irrelevant constraints.",
+        "## Retrieved Context",
+        "Use these as grounded reference material. Reuse only what genuinely fits the described system.",
     ]
 
     for hit in hits:
@@ -546,13 +709,15 @@ def format_retrieved_context(hits: list[RagHit]) -> str:
         scale = meta.get("scale", "")
         lessons = meta.get("lessons", "")
         source_path = meta.get("source_path", "")
+        scope = meta.get("scope", "shared")
         snippet = hit.document.strip()
         if len(snippet) > 1400:
-            snippet = snippet[:1400].rstrip() + "…"
+            snippet = snippet[:1400].rstrip() + "..."
 
         lines.extend(
             [
                 f"### Source: {project_id}",
+                f"- Scope: {'Project-specific attachments' if scope == 'project' else 'Shared knowledge base'}",
                 f"- File: {source_path}",
                 f"- Industry: {industry}",
                 f"- Tech stack: {tech_stack}",
