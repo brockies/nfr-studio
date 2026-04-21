@@ -73,6 +73,33 @@ class KnowledgeBaseFile(BaseModel):
     bytes: int = 0
 
 
+class ComplianceFramework(BaseModel):
+    framework: str = ""
+    applicability: str = ""
+    rationale: str = ""
+    confidence_note: str = ""
+
+
+class ComplianceMappingRow(BaseModel):
+    framework: str = ""
+    applicability: str = ""
+    nfr_theme: str = ""
+    control_theme: str = ""
+    coverage_view: str = ""
+    evidence_required: str = ""
+    suggested_owner: str = ""
+    validation_approach: str = ""
+    notes: str = ""
+
+
+class EvidencePlanItem(BaseModel):
+    priority: str = ""
+    nfr_theme: str = ""
+    evidence_required: str = ""
+    suggested_owner: str = ""
+    suggested_delivery_stage: str = ""
+
+
 class RunPayload(BaseModel):
     """Complete generate or validate run returned by the API."""
 
@@ -90,6 +117,10 @@ class RunPayload(BaseModel):
     pack_markdown: str = ""
     rag_sources: list[RagSource] = Field(default_factory=list)
     rag_status: RagStatus = Field(default_factory=RagStatus)
+    compliance_frameworks: list[ComplianceFramework] = Field(default_factory=list)
+    compliance_mappings: list[ComplianceMappingRow] = Field(default_factory=list)
+    evidence_plan: list[EvidencePlanItem] = Field(default_factory=list)
+    proof_gaps: list[str] = Field(default_factory=list)
 
 
 class SavedRunSummary(BaseModel):
@@ -116,6 +147,13 @@ class SaveRunRequest(BaseModel):
 
     filename: str
     run: RunPayload
+
+
+class RenameRunRequest(BaseModel):
+    """Rename an existing saved run file."""
+
+    current_filename: str
+    new_filename: str
 
 
 class SaveRunResponse(BaseModel):

@@ -15,6 +15,7 @@ from .models import (
     FollowUpRequest,
     FollowUpResponse,
     KnowledgeBaseFile,
+    RenameRunRequest,
     RedactionPreview,
     RedactionRequest,
     RefineRunRequest,
@@ -37,7 +38,7 @@ from .pipeline import (
     run_validate_pipeline,
     run_validate_pipeline_sync,
 )
-from .storage import list_saved_runs, load_saved_run, save_run_file
+from .storage import list_saved_runs, load_saved_run, rename_run_file, save_run_file
 from utils.redaction import redact_text
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
@@ -381,6 +382,22 @@ def save_run(request: SaveRunRequest) -> SaveRunResponse:
 
     try:
         path = save_run_file(request.filename, request.run)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SaveRunResponse(
+        file_name=path.name,
+        modified=datetime.fromtimestamp(path.stat().st_mtime).strftime("%d %b %Y %H:%M"),
+    )
+
+
+@app.post("/api/saved-runs/rename", response_model=SaveRunResponse)
+def rename_saved_run(request: RenameRunRequest) -> SaveRunResponse:
+    """Rename a saved run file."""
+
+    try:
+        path = rename_run_file(request.current_filename, request.new_filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return SaveRunResponse(

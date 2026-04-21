@@ -54,6 +54,31 @@ export type RunPayload = {
     provider: string;
     message: string;
   };
+  compliance_frameworks: {
+    framework: string;
+    applicability: string;
+    rationale: string;
+    confidence_note: string;
+  }[];
+  compliance_mappings: {
+    framework: string;
+    applicability: string;
+    nfr_theme: string;
+    control_theme: string;
+    coverage_view: string;
+    evidence_required: string;
+    suggested_owner: string;
+    validation_approach: string;
+    notes: string;
+  }[];
+  evidence_plan: {
+    priority: string;
+    nfr_theme: string;
+    evidence_required: string;
+    suggested_owner: string;
+    suggested_delivery_stage: string;
+  }[];
+  proof_gaps: string[];
 };
 
 export type SavedRunSummary = {

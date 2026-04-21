@@ -682,14 +682,14 @@ GENERATE_AGENTS = [
     ("test", "Test Criteria Agent", "Generating test acceptance criteria"),
     ("conflict", "Conflict Detection Agent", "Identifying conflicts and tensions"),
     ("remediate", "Remediation Agent", "Improving weak, risky, or ambiguous NFRs"),
-    ("compliance", "Compliance Mapping Agent", "Mapping NFRs to relevant control frameworks"),
+    ("compliance", "Compliance Mapping Agent", "Mapping NFRs to relevant control frameworks and evidence expectations"),
 ]
 
 VALIDATE_AGENTS = [
     ("clarify", "Gap Clarification Agent", "Identifying missing context affecting the review"),
     ("validate", "NFR Validation Agent", "Reviewing NFRs and identifying gaps"),
     ("remediate", "Remediation Agent", "Rewriting weak or vague NFRs"),
-    ("compliance", "Compliance Mapping Agent", "Mapping NFRs to relevant control frameworks"),
+    ("compliance", "Compliance Mapping Agent", "Mapping NFRs to relevant control frameworks and evidence expectations"),
 ]
 
 GENERATE_TAB_DESCRIPTIONS = {
@@ -699,7 +699,7 @@ GENERATE_TAB_DESCRIPTIONS = {
     "test": "Lists practical acceptance criteria and suggested test approaches for the most important NFRs.",
     "conflict": "Highlights trade-offs, tensions, and direct conflicts across the NFR set.",
     "remediate": "Suggests stronger rewrites and follow-up actions for weak, risky, or ambiguous NFRs.",
-    "compliance": "Maps the NFR pack to likely control frameworks and expected evidence areas.",
+    "compliance": "Maps the NFR pack to likely control frameworks, proof obligations, and expected evidence areas.",
     "download": "Download the full pack or individual artefacts from the current run.",
     "ask": "Ask grounded follow-up questions about this run and get answers based on the outputs on this page.",
 }
@@ -708,7 +708,7 @@ VALIDATE_TAB_DESCRIPTIONS = {
     "clarify": "Shows the assumptions and missing context that affect how the supplied NFRs should be assessed.",
     "validate": "Reviews the current NFR set for gaps, vague wording, and conflicts against the system description.",
     "remediate": "Suggests stronger wording and practical improvements for weak or incomplete NFRs.",
-    "compliance": "Maps the reviewed NFR set to likely compliance themes and evidence expectations.",
+    "compliance": "Maps the reviewed NFR set to likely compliance themes, proof obligations, and evidence expectations.",
     "download": "Download the full validation pack or individual review artefacts from this run.",
     "ask": "Ask grounded follow-up questions about this validation run using the outputs on this page.",
 }

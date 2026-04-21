@@ -11,12 +11,15 @@ import { PriorityHeatmap } from "@/components/priority-heatmap";
 import { UsageSummary } from "@/components/usage-summary";
 import { ValidationInsightsPanel } from "@/components/validation-insights";
 import {
+  Check,
   FileCog,
   Files,
   LoaderCircle,
   Library,
+  Pencil,
   ShieldCheck,
-  Sparkles
+  Sparkles,
+  X
 } from "lucide-react";
 
 import { FollowUpChat } from "@/components/follow-up-chat";
@@ -36,6 +39,7 @@ import {
   fetchRunJob,
   fetchSavedRuns,
   loadSavedRun,
+  renameSavedRun,
   refineRun,
   saveRun,
   startGenerateRun,
@@ -61,6 +65,8 @@ const MODE_SUBTITLE: Record<Mode, string> = {
   generate: "Turn a plain-English system brief into a full NFR pack.",
   validate: "Review an existing NFR set and expose the gaps."
 };
+
+type PrivacyMode = "openai" | "local";
 
 function metricsForRun(run: RunPayload | null) {
   if (!run) {
@@ -113,6 +119,10 @@ export default function App() {
   const [loadingSavedRuns, setLoadingSavedRuns] = useState(true);
   const [saving, setSaving] = useState(false);
   const [refining, setRefining] = useState(false);
+  const [privacyMode, setPrivacyMode] = useState<PrivacyMode>("openai");
+  const [renamingFile, setRenamingFile] = useState("");
+  const [renameValue, setRenameValue] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const systemDescriptionPreview = useRedactionPreview(systemDescription);
@@ -328,6 +338,30 @@ export default function App() {
     }
   }
 
+  async function handleRenameSavedRun(currentFilename: string) {
+    const trimmedValue = renameValue.trim();
+    if (!trimmedValue) {
+      setError("Please enter a new run name.");
+      return;
+    }
+
+    setRenaming(true);
+    setError("");
+    setStatus("");
+
+    try {
+      const response = await renameSavedRun(currentFilename, trimmedValue);
+      await refreshSavedRuns();
+      setStatus(`Renamed to ${response.file_name}.`);
+      setRenamingFile("");
+      setRenameValue("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not rename the saved run.");
+    } finally {
+      setRenaming(false);
+    }
+  }
+
   function resetCurrentRun() {
     setActiveJob(null);
     setLoading(false);
@@ -393,10 +427,10 @@ export default function App() {
 	              <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
 	                <Sparkles className="h-6 w-6" />
 	              </div>
-	              <h1 className="text-2xl font-semibold tracking-tight">NFR Studio</h1>
+	              <h1 className="text-2xl font-semibold tracking-tight">NFR Studio: Architecture Assurance</h1>
 	            </div>
 	            <p className="mt-2 max-w-[18rem] text-sm leading-6 text-muted-foreground">
-	              {MODE_SUBTITLE[mode]}
+	              Define requirements, map controls, and plan the evidence you will need later.
 	            </p>
 	          </div>
 
@@ -491,16 +525,79 @@ export default function App() {
                             ))}
                           </div>
                         </div>
-                        <button
-                          className="w-full min-w-0 text-left"
-                          onClick={() => void handleLoadSavedRun(item.file_name)}
-                          type="button"
-                        >
-                          <div className="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold leading-5 text-foreground">
-                            {item.file_name}
+                        {renamingFile === item.file_name ? (
+                          <div className="space-y-2">
+                            <Input
+                              autoFocus
+                              value={renameValue}
+                              onChange={(event) => setRenameValue(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  void handleRenameSavedRun(item.file_name);
+                                }
+                                if (event.key === "Escape") {
+                                  setRenamingFile("");
+                                  setRenameValue("");
+                                }
+                              }}
+                            />
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                disabled={renaming}
+                                onClick={() => void handleRenameSavedRun(item.file_name)}
+                              >
+                                <Check className="mr-1 h-3.5 w-3.5" />
+                                Save
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setRenamingFile("");
+                                  setRenameValue("");
+                                }}
+                              >
+                                <X className="mr-1 h-3.5 w-3.5" />
+                                Cancel
+                              </Button>
+                            </div>
                           </div>
-                          <div className="mt-0.5 text-xs text-slate-500">{item.modified}</div>
-                        </button>
+                        ) : (
+                          <button
+                            className="w-full min-w-0 text-left"
+                            onClick={() => void handleLoadSavedRun(item.file_name)}
+                            type="button"
+                          >
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold leading-5 text-foreground">
+                                {item.file_name}
+                              </div>
+                              <span
+                                className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setRenamingFile(item.file_name);
+                                  setRenameValue(item.file_name);
+                                }}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setRenamingFile(item.file_name);
+                                    setRenameValue(item.file_name);
+                                  }
+                                }}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </span>
+                            </div>
+                            <div className="mt-0.5 text-xs text-slate-500">{item.modified}</div>
+                          </button>
+                        )}
                       </div>
                     );
                   })}
@@ -553,6 +650,46 @@ export default function App() {
               </div>
             </CardHeader>
             <CardContent className="space-y-4 pt-0">
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Privacy Mode
+                    </div>
+                    <div className="mt-1 text-sm text-slate-700">
+                      Choose whether this run should use a cloud-hosted model or a local model.
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      UI-only for now. This does not change backend routing yet.
+                    </div>
+                  </div>
+                  <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
+                    <button
+                      type="button"
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        privacyMode === "openai"
+                          ? "bg-slate-900 text-white"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                      onClick={() => setPrivacyMode("openai")}
+                    >
+                      Cloud LLM
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                        privacyMode === "local"
+                          ? "bg-emerald-600 text-white"
+                          : "text-slate-600 hover:bg-slate-100"
+                      }`}
+                      onClick={() => setPrivacyMode("local")}
+                    >
+                      Local LLM
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-2">
                 <label className="text-sm font-semibold">Project</label>
                 <Input

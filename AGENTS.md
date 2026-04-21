@@ -126,7 +126,7 @@
 
 **Behaviour:**
 
-- Consider frameworks such as ISO 27001, SOC 2, GDPR or UK GDPR, PCI DSS, and NIS2 where relevant.
+- Consider frameworks such as ISO 27001, SOC 2, GDPR or UK GDPR, PCI DSS, NIS2, the EU AI Act, ISO/IEC 42001, and NIST AI RMF where relevant.
 - Only map frameworks that plausibly apply to the described system.
 - Be explicit when coverage is inferred or partial.
 - Focus on practical control themes rather than legal overstatement.

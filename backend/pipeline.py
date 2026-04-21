@@ -17,6 +17,7 @@ from agents.nfr_agent import (
     detect_conflicts,
     estimate_usage_cost,
     generate_nfrs,
+    generate_system_diagram,
     generate_test_criteria,
     map_compliance,
     remediate_nfrs,
@@ -34,6 +35,7 @@ from .storage import hydrate_pack
 
 GENERATE_AGENTS: list[tuple[str, str]] = [
     ("clarify", "Gap Clarification Agent"),
+    ("diagram", "Diagram Generation Agent"),
     ("nfr", "NFR Generation Agent"),
     ("score", "Scoring and Priority Agent"),
     ("test", "Test Acceptance Criteria Agent"),
@@ -354,6 +356,17 @@ def run_generate_pipeline_sync(
     run.agent_states["clarify"] = "done"
     emit_progress(run, on_progress)
 
+    run.agent_states["diagram"] = "running"
+    emit_progress(run, on_progress)
+    diagram_input = combined_system_description
+    if rag_context:
+        diagram_input = f"{diagram_input}\n\n{rag_context}"
+    diagram_run = generate_system_diagram(diagram_input)
+    run.results["diagram"] = diagram_run.content
+    record_usage(run.usage_stats, "diagram", "Diagram Generation Agent", diagram_run)
+    run.agent_states["diagram"] = "done"
+    emit_progress(run, on_progress)
+
     run.agent_states["nfr"] = "running"
     emit_progress(run, on_progress)
     nfr_input = f"""## Source System Description
@@ -579,6 +592,7 @@ def build_followup_context(run: RunPayload) -> str:
     if run.mode == "generate":
         sections = [
             ("Gap Clarification", run.results.get("clarify", "")),
+            ("System Diagram", run.results.get("diagram", "")),
             ("Generated NFRs", run.results.get("nfr", "")),
             ("Priority Matrix", run.results.get("score", "")),
             ("Test Acceptance Criteria", run.results.get("test", "")),

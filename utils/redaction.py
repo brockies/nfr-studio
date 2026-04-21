@@ -70,6 +70,25 @@ PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ),
 ]
 
+NON_SECRET_VALUE_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"^\[[A-Z_]+\d*\]$"),
+    re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.IGNORECASE),
+    re.compile(r"^(?:https?://|ftp://|www\.)", re.IGNORECASE),
+    re.compile(r"^(?:\d{1,3}\.){3}\d{1,3}$"),
+    re.compile(
+        r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$",
+        re.IGNORECASE,
+    ),
+)
+
+CREDENTIAL_LIKE_PATTERN = re.compile(
+    r'(?P<quote>["\'])?(?P<value>(?=[^\s,;]{12,128}\b)[^\s,;]+)(?P=quote)?'
+)
+
 
 def redact_text(text: str) -> RedactionResult:
     """Replace common sensitive values with typed placeholders."""
@@ -94,6 +113,8 @@ def redact_text(text: str) -> RedactionResult:
             ),
             redacted,
         )
+
+    redacted = _redact_credential_like_values(redacted, counts, items)
 
     return RedactionResult(
         original_text=text,
@@ -161,6 +182,61 @@ def _replace_secret(
         )
     )
     return f"{match.group(1)}{match.group(2)}{replacement}"
+
+
+def _redact_credential_like_values(
+    text: str,
+    counts: dict[str, int],
+    items: list[RedactionItem],
+) -> str:
+    """Redact standalone values that strongly resemble passwords or secrets."""
+
+    def replace(match: re.Match[str]) -> str:
+        quote = match.group("quote") or ""
+        value = match.group("value")
+        if not _looks_like_secret_value(value):
+            return match.group(0)
+
+        counts["secret"] = counts.get("secret", 0) + 1
+        replacement = f"[SECRET_{counts['secret']:02d}]"
+        items.append(
+            RedactionItem(
+                label="secret",
+                original=value,
+                replacement=replacement,
+                name="credential-like value",
+            )
+        )
+        return f"{quote}{replacement}{quote}" if quote else replacement
+
+    return CREDENTIAL_LIKE_PATTERN.sub(replace, text)
+
+
+def _looks_like_secret_value(value: str) -> bool:
+    """Apply a conservative heuristic for unlabeled password-like tokens."""
+
+    if len(value) < 12 or len(value) > 128:
+        return False
+    if any(pattern.fullmatch(value) for pattern in NON_SECRET_VALUE_PATTERNS):
+        return False
+    if any(ch.isspace() for ch in value):
+        return False
+    if "/" in value or "\\" in value:
+        return False
+
+    has_lower = any(ch.islower() for ch in value)
+    has_upper = any(ch.isupper() for ch in value)
+    has_digit = any(ch.isdigit() for ch in value)
+    has_symbol = any(not ch.isalnum() for ch in value)
+    category_count = sum((has_lower, has_upper, has_digit, has_symbol))
+
+    if has_symbol and has_digit and (has_lower or has_upper) and category_count >= 3:
+        return True
+
+    if has_lower and has_upper and has_digit and len(value) >= 16:
+        return True
+
+    return False
 
 
 def _shorten(value: str, limit: int = 48) -> str:

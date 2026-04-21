@@ -104,6 +104,41 @@ List any areas where more information is needed to define NFRs precisely.
 """
 
 
+DIAGRAM_GENERATION_PROMPT = """You are a Senior Solutions Architect creating architecture diagrams from a plain-English system description.
+
+Generate a concise PlantUML system context diagram that helps architects validate the main system boundaries, actors, integrations, and trust-sensitive flows.
+
+## Rules:
+- Only include components, actors, and integrations that are supported by the supplied context
+- If something is inferred, label it clearly as inferred in the summary, not in the diagram syntax
+- Keep the diagram readable and focused on a system context / major integration view
+- Include external actors, core platform, major dependencies, and AI provider/model dependency where relevant
+- Use PlantUML syntax only inside the code block
+- Do not invent low-level infrastructure unless it is explicitly described
+- Use a safe, simple subset of PlantUML only
+- Prefer `actor`, `rectangle`, `component`, `database`, and simple `-->` relationships
+- For grouping, use nested `rectangle "Label" { ... }` blocks
+- Do not use `boundary`, `node`, `deployment`, `package`, `frame`, or other advanced container keywords
+- Do not use unsupported shorthand that may fail to render
+
+## Output format:
+
+## System Diagram
+
+### Diagram Summary
+2-4 bullet points describing what the diagram shows and what was inferred.
+
+### PlantUML
+
+```plantuml
+@startuml
+title System Context Diagram
+' PlantUML content here
+@enduml
+```
+"""
+
+
 # â”€â”€ Agent 2: NFR Scorer & Prioritiser â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 NFR_SCORING_PROMPT = """You are a Senior Solutions Architect specialising in risk-based prioritisation of NFRs.
@@ -282,26 +317,45 @@ Map the supplied NFRs and supporting context to common frameworks. This is for p
 - GDPR / UK GDPR
 - PCI DSS
 - NIS2 / operational resilience themes
+- EU AI Act
+- ISO/IEC 42001
+- NIST AI RMF
 
 ## Rules:
 - Only map frameworks that appear relevant to the described system
+- For every framework considered, label it as Applicable, Potentially Applicable, or Not Applicable
 - Be clear when coverage is partial or inferred
 - Focus on practical control themes rather than legal overstatement
+- For critical or high-priority NFR themes, explain what evidence would likely be needed later
+- Prefer concrete artefacts such as policies, standards, runbooks, test reports, logs, reviews, decision records, model cards, DPIAs, or incident evidence
+- Suggest likely owners using role-based labels such as Security, Platform, Engineering Lead, Product, Data Protection, or AI Governance
+- Call out proof gaps where a requirement exists but evidence, ownership, validation, or framework linkage is unclear
+- When the system uses AI, include AI-governance-oriented evidence where relevant, such as human oversight, model inventory, provider due diligence, monitoring, and AI literacy artefacts
 
 ## Output format:
 
-## Compliance Mapping
+## Compliance & Evidence Mapping
 
 ### Relevant Frameworks
-Bullet list of the most relevant frameworks and why they matter here.
+Bullet list of frameworks considered.
+
+For each framework use this structure:
+- **[Framework]** - Applicability: `Applicable | Potentially Applicable | Not Applicable`
+  - Why it matters here
+  - Confidence note if relevance is inferred from limited context
 
 ### Mapping Matrix
 
-| Framework | NFR Theme / Requirement | Control Area | Coverage View | Notes |
-|-----------|-------------------------|--------------|---------------|-------|
+| Framework | Applicability | NFR Theme / Requirement | Control Theme | Coverage View | Evidence Required | Suggested Owner | Validation Approach | Notes |
+|-----------|---------------|-------------------------|---------------|---------------|-------------------|-----------------|--------------------|-------|
 
-### Compliance Gaps
-Short list of notable areas where additional controls, evidence, or decisions may be needed.
+### Prioritised Evidence Plan
+
+| Priority | NFR / Theme | Evidence Required | Suggested Owner | Suggested Delivery Stage |
+|----------|--------------|-------------------|-----------------|--------------------------|
+
+### Proof Gaps
+Short list of notable areas where a requirement appears to exist but the proof plan is weak or missing.
 
 ### Evidence Suggestions
 What artefacts or operational evidence should be produced to support compliance.
@@ -470,6 +524,35 @@ def generate_nfrs(system_description: str, *, retrieved_context: str = "") -> Ag
         user_content = f"{user_content}\n\n{retrieved_context.strip()}"
 
     return _call_openai(NFR_GENERATION_PROMPT, user_content)
+
+
+def generate_system_diagram(system_description: str) -> AgentRunResult:
+    """Generate a PlantUML system context diagram from the supplied description."""
+
+    result = _call_openai(
+        DIAGRAM_GENERATION_PROMPT,
+        f"Please generate a system context diagram for the following description:\n\n{system_description}",
+        max_tokens=1800,
+    )
+    return AgentRunResult(
+        content=_sanitize_plantuml_markdown(result.content),
+        usage=result.usage,
+        model=result.model,
+    )
+
+
+def _sanitize_plantuml_markdown(content: str) -> str:
+    """Normalize a few error-prone PlantUML constructs into safer equivalents."""
+
+    def replace_block(match: Any) -> str:
+        prefix = match.group(1)
+        code = match.group(2)
+        sanitized = re.sub(r"(?im)^(\s*)boundary(\s+)", r"\1rectangle\2", code)
+        return f"{prefix}{sanitized}```"
+
+    import re
+
+    return re.sub(r"(?is)(```plantuml\s*\n)(.*?)(```)", replace_block, content)
 
 
 def clarify_gaps(system_description: str) -> AgentRunResult:

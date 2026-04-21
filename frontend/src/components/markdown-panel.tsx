@@ -1,5 +1,73 @@
+import type { ComponentPropsWithoutRef } from "react";
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+
+const PLANTUML_SERVER_URL = (import.meta.env.VITE_PLANTUML_SERVER_URL ?? "").trim();
+
+function encodePlantUmlHex(source: string): string {
+  const bytes = new TextEncoder().encode(source);
+  return `~h${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function PlantUmlBlock({ source }: { source: string }) {
+  const trimmed = source.trim();
+  const hasRenderer = Boolean(PLANTUML_SERVER_URL);
+  const renderUrl = hasRenderer
+    ? `${PLANTUML_SERVER_URL.replace(/\/+$/, "")}/svg/${encodePlantUmlHex(trimmed)}`
+    : "";
+
+  return (
+    <div className="my-5 space-y-3">
+      {hasRenderer ? (
+        <div className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+            Rendered Diagram
+          </div>
+          <div className="overflow-x-auto p-4">
+            <img
+              alt="Rendered PlantUML diagram"
+              className="mx-auto block h-auto w-full max-w-full object-contain"
+              loading="lazy"
+              src={renderUrl}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="rounded-[20px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+          PlantUML rendering is not configured yet. Set `VITE_PLANTUML_SERVER_URL` to a trusted
+          PlantUML server to render the diagram visually; the source is still shown below.
+        </div>
+      )}
+
+      <details className="rounded-[20px] border border-slate-200 bg-slate-950 text-slate-100">
+        <summary className="cursor-pointer select-none px-4 py-3 text-sm font-semibold text-slate-100">
+          View PlantUML source
+        </summary>
+        <pre className="overflow-x-auto px-4 pb-4 pt-0 text-sm leading-6 text-slate-100">
+          <code>{trimmed}</code>
+        </pre>
+      </details>
+    </div>
+  );
+}
+
+function CodeBlock(props: ComponentPropsWithoutRef<"code"> & { className?: string }) {
+  const className = props.className ?? "";
+  const match = /language-([\w-]+)/.exec(className);
+  const language = (match?.[1] ?? "").toLowerCase();
+  const content = String(props.children ?? "").replace(/\n$/, "");
+
+  if (language === "plantuml") {
+    return <PlantUmlBlock source={content} />;
+  }
+
+  return (
+    <code className={className}>
+      {props.children}
+    </code>
+  );
+}
 
 export function MarkdownPanel({ content }: { content: string }) {
   return (
@@ -26,7 +94,14 @@ export function MarkdownPanel({ content }: { content: string }) {
         [&_th]:border [&_th]:border-slate-200 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:text-sm [&_th]:font-semibold [&_th]:text-slate-900
         [&_td]:border [&_td]:border-slate-200 [&_td]:px-3 [&_td]:py-2 [&_td]:align-top [&_td]:text-sm [&_td]:leading-6"
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+      <ReactMarkdown
+        components={{
+          code: CodeBlock,
+        }}
+        remarkPlugins={[remarkGfm]}
+      >
+        {content}
+      </ReactMarkdown>
     </div>
   );
 }

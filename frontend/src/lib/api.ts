@@ -61,6 +61,17 @@ export async function saveRun(filename: string, run: RunPayload) {
   return parseResponse<SaveRunResponse>(response);
 }
 
+export async function renameSavedRun(currentFilename: string, newFilename: string) {
+  const response = await safeFetch(`${API_BASE}/api/saved-runs/rename`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ current_filename: currentFilename, new_filename: newFilename })
+  });
+  return parseResponse<SaveRunResponse>(response);
+}
+
 export async function askFollowUp(run: RunPayload, question: string, history: ChatMessage[]) {
   const response = await safeFetch(`${API_BASE}/api/follow-up`, {
     method: "POST",

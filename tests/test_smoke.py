@@ -9,7 +9,10 @@ from fastapi.testclient import TestClient
 
 import backend.main
 import backend.pipeline
-from agents.nfr_agent import AgentRunResult
+from agents.nfr_agent import AgentRunResult, COMPLIANCE_MAPPING_PROMPT, _sanitize_plantuml_markdown
+import backend.storage
+from backend.storage import hydrate_compliance_details
+from utils.redaction import redact_text
 
 
 class FakeEmbedder:
@@ -89,6 +92,27 @@ def test_generate_endpoint_returns_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(backend.pipeline, "clarify_gaps", lambda _: _agent("## Gap Clarification Analysis\n- ok"))
     monkeypatch.setattr(
         backend.pipeline,
+        "generate_system_diagram",
+        lambda *_args, **_kwargs: _agent(
+            """## System Diagram
+
+### Diagram Summary
+- Core platform with one external integration.
+
+### PlantUML
+
+```plantuml
+@startuml
+actor User
+rectangle Platform
+User --> Platform
+@enduml
+```
+"""
+        ),
+    )
+    monkeypatch.setattr(
+        backend.pipeline,
         "generate_nfrs",
         lambda *_args, **_kwargs: _agent(
             """## NFR Analysis
@@ -152,7 +176,104 @@ Test system.
 
     payload: dict[str, Any] = response.json()
     assert payload["mode"] == "generate"
+    assert "diagram" in payload["results"]
     assert "nfr" in payload["results"]
     assert isinstance(payload.get("rag_status"), dict)
     assert payload["counts"]["nfr_count"] >= 1
+
+
+def test_compliance_prompt_includes_evidence_planning_sections() -> None:
+    assert "Applicable, Potentially Applicable, or Not Applicable" in COMPLIANCE_MAPPING_PROMPT
+    assert "## Compliance & Evidence Mapping" in COMPLIANCE_MAPPING_PROMPT
+    assert "### Prioritised Evidence Plan" in COMPLIANCE_MAPPING_PROMPT
+    assert "### Proof Gaps" in COMPLIANCE_MAPPING_PROMPT
+
+
+def test_hydrate_compliance_details_parses_structured_sections() -> None:
+    run = backend.pipeline.new_run(mode="generate", system_description="demo system")
+    run.results["compliance"] = """## Compliance & Evidence Mapping
+
+### Relevant Frameworks
+- **EU AI Act** - Applicability: `Applicable`
+  - The system uses AI to support user-facing business decisions.
+  - Confidence note: AI usage is explicitly described.
+- **PCI DSS** - Applicability: `Not Applicable`
+  - Core workflows do not directly process cardholder data.
+
+### Mapping Matrix
+
+| Framework | Applicability | NFR Theme / Requirement | Control Theme | Coverage View | Evidence Required | Suggested Owner | Validation Approach | Notes |
+|-----------|---------------|-------------------------|---------------|---------------|-------------------|-----------------|--------------------|-------|
+| EU AI Act | Applicable | Human review over AI outputs | Human oversight | Partial | Oversight procedure and approval records | Product | Control walkthrough | Demo note |
+
+### Prioritised Evidence Plan
+
+| Priority | NFR / Theme | Evidence Required | Suggested Owner | Suggested Delivery Stage |
+|----------|--------------|-------------------|-----------------|--------------------------|
+| HIGH | Human oversight | Signed oversight procedure | Product | Before production |
+
+### Proof Gaps
+- No defined AI literacy training artefact yet.
+- No clear owner for periodic model-provider reassessment.
+"""
+
+    hydrated = hydrate_compliance_details(run)
+
+    assert len(hydrated.compliance_frameworks) == 2
+    assert hydrated.compliance_frameworks[0].framework == "EU AI Act"
+    assert hydrated.compliance_frameworks[0].applicability == "Applicable"
+    assert len(hydrated.compliance_mappings) == 1
+    assert hydrated.compliance_mappings[0].control_theme == "Human oversight"
+    assert len(hydrated.evidence_plan) == 1
+    assert hydrated.evidence_plan[0].suggested_owner == "Product"
+    assert len(hydrated.proof_gaps) == 2
+
+
+def test_redaction_masks_credential_like_values_without_labels() -> None:
+    result = redact_text('Temporary login secret is "Tr0ub4dor!2026" for the demo.')
+
+    assert result.changed is True
+    assert "[SECRET_01]" in result.redacted_text
+    assert any(item.name == "credential-like value" for item in result.items)
+
+
+def test_redaction_does_not_mask_normal_architecture_text() -> None:
+    result = redact_text(
+        "The platform uses https://api.example.com, stores files in blob storage, and serves 1500 users."
+    )
+
+    assert "[SECRET_" not in result.redacted_text
+    assert "[URL_01]" in result.redacted_text
+
+
+def test_rename_saved_run_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(backend.storage, "SAVE_DIR", tmp_path)
+    source = tmp_path / "demo_run.md"
+    source.write_text("# NFR Pack\n\n## System Description\nDemo\n", encoding="utf-8")
+
+    renamed = backend.storage.rename_run_file("demo_run.md", "renamed_demo.md")
+
+    assert renamed.name == "renamed_demo.md"
+    assert renamed.exists()
+    assert not source.exists()
+
+
+def test_plantuml_sanitizer_rewrites_boundary_blocks() -> None:
+    content = """## System Diagram
+
+### PlantUML
+
+```plantuml
+@startuml
+boundary "AI Provider" {
+  component "LLM API" as LLM
+}
+@enduml
+```
+"""
+
+    sanitized = _sanitize_plantuml_markdown(content)
+
+    assert 'boundary "AI Provider"' not in sanitized
+    assert 'rectangle "AI Provider"' in sanitized
 

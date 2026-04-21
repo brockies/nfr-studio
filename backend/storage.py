@@ -7,13 +7,20 @@ from pathlib import Path
 import re
 from typing import Any
 
-from .models import RunCounts, RunPayload, SavedRunSummary
+from .models import (
+    ComplianceFramework,
+    ComplianceMappingRow,
+    EvidencePlanItem,
+    RunCounts,
+    RunPayload,
+    SavedRunSummary,
+)
 
 
 SAVE_DIR = Path("saved_runs")
 SAVE_DIR.mkdir(exist_ok=True)
 
-GENERATE_AGENT_COUNT = 7
+GENERATE_AGENT_COUNT = 8
 VALIDATE_AGENT_COUNT = 4
 
 
@@ -125,6 +132,10 @@ Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}
 
 ---
 
+{run.results.get("diagram", "")}
+
+---
+
 {nfr_section}
 
 ---
@@ -203,9 +214,172 @@ def build_pack(run: RunPayload) -> str:
     return build_generate_pack(run) if run.mode == "generate" else build_validate_pack(run)
 
 
+def extract_markdown_subsection(content: str, heading: str) -> str:
+    """Extract a level-3 markdown subsection by heading text."""
+
+    pattern = rf"(?ms)^### {re.escape(heading)}\n(.*?)(?=^### |^## |\Z)"
+    match = re.search(pattern, (content or "").strip())
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def parse_markdown_table(section: str) -> list[dict[str, str]]:
+    """Parse a simple markdown table into a list of dictionaries."""
+
+    lines = [
+        line.strip()
+        for line in (section or "").splitlines()
+        if line.strip().startswith("|") and line.strip().endswith("|")
+    ]
+    if len(lines) < 2:
+        return []
+
+    headers = [cell.strip() for cell in lines[0].strip("|").split("|")]
+    if not headers:
+        return []
+
+    rows: list[dict[str, str]] = []
+    for line in lines[2:]:
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) < len(headers):
+            cells.extend([""] * (len(headers) - len(cells)))
+        rows.append({header: cells[index] for index, header in enumerate(headers)})
+    return rows
+
+
+def parse_compliance_frameworks(content: str) -> list[ComplianceFramework]:
+    """Extract framework applicability details from the compliance markdown."""
+
+    section = extract_markdown_subsection(content, "Relevant Frameworks")
+    if not section:
+        return []
+
+    frameworks: list[ComplianceFramework] = []
+    current: ComplianceFramework | None = None
+
+    for raw_line in section.splitlines():
+        line = raw_line.rstrip()
+        stripped = line.strip()
+        if not stripped:
+            continue
+
+        top_level_match = re.match(
+            r"^- \*\*(.+?)\*\* - Applicability:\s*`?([^`]+?)`?\s*$",
+            stripped,
+        )
+        if top_level_match:
+            if current is not None:
+                frameworks.append(current)
+            current = ComplianceFramework(
+                framework=top_level_match.group(1).strip(),
+                applicability=top_level_match.group(2).strip(),
+            )
+            continue
+
+        if current is None:
+            continue
+
+        child_match = re.match(r"^- (.+)$", stripped)
+        if not child_match:
+            continue
+
+        detail = child_match.group(1).strip()
+        lowered = detail.lower()
+        if lowered.startswith("confidence note"):
+            current.confidence_note = detail.split(":", 1)[1].strip() if ":" in detail else detail
+        elif not current.rationale:
+            current.rationale = detail
+        else:
+            current.rationale = f"{current.rationale} {detail}".strip()
+
+    if current is not None:
+        frameworks.append(current)
+
+    return frameworks
+
+
+def parse_evidence_plan(content: str) -> list[EvidencePlanItem]:
+    """Extract prioritised evidence plan rows from the compliance markdown."""
+
+    section = extract_markdown_subsection(content, "Prioritised Evidence Plan")
+    rows = parse_markdown_table(section)
+    items: list[EvidencePlanItem] = []
+
+    for row in rows:
+        items.append(
+            EvidencePlanItem(
+                priority=row.get("Priority", ""),
+                nfr_theme=row.get("NFR / Theme", ""),
+                evidence_required=row.get("Evidence Required", ""),
+                suggested_owner=row.get("Suggested Owner", ""),
+                suggested_delivery_stage=row.get("Suggested Delivery Stage", ""),
+            )
+        )
+
+    return items
+
+
+def parse_compliance_mappings(content: str) -> list[ComplianceMappingRow]:
+    """Extract mapping matrix rows from the compliance markdown."""
+
+    section = extract_markdown_subsection(content, "Mapping Matrix")
+    rows = parse_markdown_table(section)
+    items: list[ComplianceMappingRow] = []
+
+    for row in rows:
+        items.append(
+            ComplianceMappingRow(
+                framework=row.get("Framework", ""),
+                applicability=row.get("Applicability", ""),
+                nfr_theme=row.get("NFR Theme / Requirement", ""),
+                control_theme=row.get("Control Theme", ""),
+                coverage_view=row.get("Coverage View", ""),
+                evidence_required=row.get("Evidence Required", ""),
+                suggested_owner=row.get("Suggested Owner", ""),
+                validation_approach=row.get("Validation Approach", ""),
+                notes=row.get("Notes", ""),
+            )
+        )
+
+    return items
+
+
+def parse_proof_gaps(content: str) -> list[str]:
+    """Extract proof gap bullets or numbered items from the compliance markdown."""
+
+    section = extract_markdown_subsection(content, "Proof Gaps")
+    if not section:
+        return []
+
+    items: list[str] = []
+    for raw_line in section.splitlines():
+        stripped = raw_line.strip()
+        bullet_match = re.match(r"^[-*]\s+(.+)$", stripped)
+        ordered_match = re.match(r"^\d+\.\s+(.+)$", stripped)
+        if bullet_match:
+            items.append(bullet_match.group(1).strip())
+        elif ordered_match:
+            items.append(ordered_match.group(1).strip())
+
+    return items
+
+
+def hydrate_compliance_details(run: RunPayload) -> RunPayload:
+    """Populate structured compliance/evidence fields from markdown results."""
+
+    compliance_content = run.results.get("compliance", "")
+    run.compliance_frameworks = parse_compliance_frameworks(compliance_content)
+    run.compliance_mappings = parse_compliance_mappings(compliance_content)
+    run.evidence_plan = parse_evidence_plan(compliance_content)
+    run.proof_gaps = parse_proof_gaps(compliance_content)
+    return run
+
+
 def hydrate_pack(run: RunPayload) -> RunPayload:
     """Fill in derived counts and the full markdown pack on a run payload."""
 
+    run = hydrate_compliance_details(run)
     run.counts = build_counts(run.mode, run.results)
     run.pack_markdown = build_pack(run)
     return run
@@ -233,6 +407,16 @@ def parse_saved_run(content: str) -> dict[str, Any]:
         mode = "generate"
         result_keys = [
             "clarify",
+            "diagram",
+            "nfr",
+            "score",
+            "test",
+            "conflict",
+            "remediate",
+            "compliance",
+        ]
+        legacy_result_keys = [
+            "clarify",
             "nfr",
             "score",
             "test",
@@ -248,7 +432,9 @@ def parse_saved_run(content: str) -> dict[str, Any]:
 
     if "## System Description" not in header:
         raise ValueError("Saved run is missing a system description.")
-    if len(sections) < len(result_keys) + 1:
+    if mode == "generate" and len(sections) == len(legacy_result_keys) + 1:
+        result_keys = legacy_result_keys
+    elif len(sections) < len(result_keys) + 1:
         raise ValueError("Saved run is incomplete.")
 
     system_description = extract_header_section(header, "System Description")
@@ -329,6 +515,25 @@ def save_run_file(filename: str, run: RunPayload) -> Path:
     return path
 
 
+def rename_run_file(current_filename: str, new_filename: str) -> Path:
+    """Rename an existing saved run file."""
+
+    current_safe_name = sanitize_filename(current_filename)
+    new_safe_name = sanitize_filename(new_filename)
+    current_path = SAVE_DIR / current_safe_name
+    new_path = SAVE_DIR / new_safe_name
+
+    if not current_path.exists():
+        raise FileNotFoundError(f"`{current_safe_name}` was not found.")
+    if current_path == new_path:
+        return current_path
+    if new_path.exists():
+        raise ValueError(f"`{new_safe_name}` already exists.")
+
+    current_path.rename(new_path)
+    return new_path
+
+
 def load_saved_run(filename: str) -> tuple[Path, RunPayload]:
     """Load a saved run from disk and convert it to the transport model."""
 
@@ -350,5 +555,6 @@ def load_saved_run(filename: str) -> tuple[Path, RunPayload]:
         result_source="loaded",
         pack_markdown=content,
     )
+    run = hydrate_compliance_details(run)
     run.counts = build_counts(run.mode, run.results)
     return path, run

@@ -8,19 +8,20 @@ import type { Mode } from "@/types";
 
 const GENERATE_STEPS = [
   { key: "clarify", title: "Gap Clarification" },
+  { key: "diagram", title: "Diagram Generation" },
   { key: "nfr", title: "NFR Generation" },
   { key: "score", title: "Priority Scoring" },
   { key: "test", title: "Test Criteria" },
   { key: "conflict", title: "Conflict Detection" },
   { key: "remediate", title: "Remediation" },
-  { key: "compliance", title: "Compliance Mapping" }
+  { key: "compliance", title: "Compliance & Evidence" }
 ];
 
 const VALIDATE_STEPS = [
   { key: "clarify", title: "Gap Clarification" },
   { key: "validate", title: "Validation" },
   { key: "remediate", title: "Remediation" },
-  { key: "compliance", title: "Compliance Mapping" }
+  { key: "compliance", title: "Compliance & Evidence" }
 ];
 
 export function PipelineProgress({
@@ -56,7 +57,7 @@ export function PipelineProgress({
           <CardTitle className="text-2xl">Agent Status</CardTitle>
           <p className="mt-1 text-xs leading-5 text-muted-foreground sm:text-sm">
             {mode === "generate"
-              ? "Seven agents turn a system description into a prioritized, testable NFR pack."
+              ? "Eight agents turn a system description into a visualized, prioritized, testable NFR pack."
               : "Four agents review the supplied NFR set and tighten the weak spots."}
           </p>
           {loading ? (
