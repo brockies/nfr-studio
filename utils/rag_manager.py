@@ -205,7 +205,15 @@ def _tokenize(text: str) -> set[str]:
 def _hybrid_rerank(query: str, hits: list[RagHit]) -> list[RagHit]:
     q = _tokenize(query)
     if not q:
-        return hits
+        return sorted(
+            hits,
+            key=lambda hit: (
+                -hit.score,
+                str(hit.metadata.get("source_path", "")),
+                int(hit.metadata.get("chunk_index", 0) or 0),
+                hit.id,
+            ),
+        )
 
     rescored: list[tuple[float, RagHit]] = []
     for hit in hits:
@@ -215,7 +223,14 @@ def _hybrid_rerank(query: str, hits: list[RagHit]) -> list[RagHit]:
         combined = hit.score + min(0.35, overlap / 40.0)
         rescored.append((combined, hit))
 
-    rescored.sort(key=lambda pair: pair[0], reverse=True)
+    rescored.sort(
+        key=lambda pair: (
+            -pair[0],
+            str(pair[1].metadata.get("source_path", "")),
+            int(pair[1].metadata.get("chunk_index", 0) or 0),
+            pair[1].id,
+        )
+    )
     return [hit for _, hit in rescored]
 
 

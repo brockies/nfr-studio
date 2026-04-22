@@ -14,6 +14,7 @@ from backend.industry_profiles import get_industry_profile
 
 
 MODEL_NAME = "gpt-4o"
+MODEL_TEMPERATURE = 0.1
 MODEL_PRICING = {
     "input_per_million": 2.50,
     "cached_input_per_million": 1.25,
@@ -492,6 +493,7 @@ def _call_openai(system_prompt: str, user_content: str, max_tokens: int = 2000) 
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     response = client.chat.completions.create(
         model=MODEL_NAME,
+        temperature=MODEL_TEMPERATURE,
         max_tokens=max_tokens,
         messages=[
             {"role": "system", "content": system_prompt},
@@ -509,6 +511,7 @@ def _call_openai_parts(system_prompt: str, user_parts: list[dict[str, Any]], max
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     response = client.chat.completions.create(
         model=MODEL_NAME,
+        temperature=MODEL_TEMPERATURE,
         max_tokens=max_tokens,
         messages=[
             {"role": "system", "content": system_prompt},

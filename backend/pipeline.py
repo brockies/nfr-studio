@@ -235,7 +235,15 @@ def merge_rag_hits(*groups: Sequence[RagHit], top_k: int = 6) -> list[RagHit]:
     merged: list[RagHit] = []
     seen: set[str] = set()
 
-    for hit in sorted((item for group in groups for item in group), key=lambda item: item.score, reverse=True):
+    for hit in sorted(
+        (item for group in groups for item in group),
+        key=lambda item: (
+            -item.score,
+            str(item.metadata.get("source_path", "")),
+            int(item.metadata.get("chunk_index", 0) or 0),
+            item.id,
+        ),
+    ):
         dedupe_key = f"{hit.metadata.get('source_path', '')}::{hit.metadata.get('chunk_index', 0)}"
         if dedupe_key in seen:
             continue
