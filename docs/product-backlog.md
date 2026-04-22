@@ -262,6 +262,25 @@ Acceptance criteria:
 - Each view reuses the same underlying run outputs.
 - No role view invents new requirements not present in the main run context.
 
+### Epic P2-6: Delivery Governance and RAID
+
+Goal: Support healthier product delivery without mixing governance tracking into the core backlog.
+
+#### Story P2-6.1
+
+As a product team, I want a separate RAID log so risks, assumptions, issues, and dependencies are visible without cluttering the feature backlog.
+
+Acceptance criteria:
+
+- The product repo includes a separate RAID document rather than embedding RAID entries directly into the backlog.
+- RAID entries can capture:
+  - risks
+  - assumptions
+  - issues
+  - dependencies
+- Initial RAID content reflects real delivery concerns such as model variability, privacy posture, project-scoped retrieval, external provider dependence, and workflow/orchestration complexity.
+- RAID setup is scheduled after an initial round of user testing so delivery governance reflects observed product and user risks, not only design assumptions.
+
 ## Longer-Term Backlog
 
 ### Epic LT-1: Assurance Case Mode
@@ -381,6 +400,7 @@ Acceptance criteria:
 - P2-3 Evidence Crosswalks
 - P2-4 Confidence and Assumption Scoring
 - P2-5 Stakeholder Views
+- P2-6 Delivery Governance and RAID
 
 ### Strategic Release
 

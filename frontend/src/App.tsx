@@ -19,6 +19,7 @@ import {
   Pencil,
   ShieldCheck,
   Sparkles,
+  Trash2,
   X
 } from "lucide-react";
 
@@ -39,6 +40,7 @@ import {
   fetchRunJob,
   fetchSavedRuns,
   loadSavedRun,
+  deleteSavedRun,
   renameSavedRun,
   refineRun,
   saveRun,
@@ -232,6 +234,7 @@ export default function App() {
   const [renamingFile, setRenamingFile] = useState("");
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [deletingFile, setDeletingFile] = useState("");
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
   const systemDescriptionPreview = useRedactionPreview(systemDescription);
@@ -492,6 +495,34 @@ export default function App() {
     }
   }
 
+  async function handleDeleteSavedRun(fileName: string) {
+    const confirmed = window.confirm(`Delete saved run "${fileName}"? This cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingFile(fileName);
+    setError("");
+    setStatus("");
+
+    try {
+      await deleteSavedRun(fileName);
+      if (run && saveName === fileName) {
+        setSaveName(defaultRunFilename(mode, projectName));
+      }
+      await refreshSavedRuns();
+      setStatus(`Deleted ${fileName}.`);
+      if (renamingFile === fileName) {
+        setRenamingFile("");
+        setRenameValue("");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not delete the saved run.");
+    } finally {
+      setDeletingFile("");
+    }
+  }
+
   function resetCurrentRun() {
     setActiveJob(null);
     setLoading(false);
@@ -703,27 +734,56 @@ export default function App() {
                               <div className="overflow-hidden text-ellipsis whitespace-nowrap text-sm font-semibold leading-5 text-foreground">
                                 {item.file_name}
                               </div>
-                              <span
-                                className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  setRenamingFile(item.file_name);
-                                  setRenameValue(item.file_name);
-                                }}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
+                              <div className="flex items-center gap-1">
+                                <span
+                                  className="rounded-full p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                                  onClick={(event) => {
                                     event.preventDefault();
                                     event.stopPropagation();
                                     setRenamingFile(item.file_name);
                                     setRenameValue(item.file_name);
-                                  }
-                                }}
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </span>
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      setRenamingFile(item.file_name);
+                                      setRenameValue(item.file_name);
+                                    }
+                                  }}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </span>
+                                <span
+                                  className="rounded-full p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    if (!deletingFile) {
+                                      void handleDeleteSavedRun(item.file_name);
+                                    }
+                                  }}
+                                  role="button"
+                                  tabIndex={0}
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter" || event.key === " ") {
+                                      event.preventDefault();
+                                      event.stopPropagation();
+                                      if (!deletingFile) {
+                                        void handleDeleteSavedRun(item.file_name);
+                                      }
+                                    }
+                                  }}
+                                >
+                                  {deletingFile === item.file_name ? (
+                                    <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  )}
+                                </span>
+                              </div>
                             </div>
                             <div className="mt-0.5 text-xs text-slate-500">{item.modified}</div>
                           </button>

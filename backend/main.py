@@ -40,7 +40,7 @@ from .pipeline import (
     run_validate_pipeline,
     run_validate_pipeline_sync,
 )
-from .storage import list_saved_runs, load_saved_run, rename_run_file, save_run_file
+from .storage import delete_run_file, list_saved_runs, load_saved_run, rename_run_file, save_run_file
 from utils.redaction import redact_text
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
@@ -462,4 +462,19 @@ def rename_saved_run(request: RenameRunRequest) -> SaveRunResponse:
     return SaveRunResponse(
         file_name=path.name,
         modified=datetime.fromtimestamp(path.stat().st_mtime).strftime("%d %b %Y %H:%M"),
+    )
+
+
+@app.delete("/api/saved-runs/{filename}", response_model=SaveRunResponse)
+def delete_saved_run(filename: str) -> SaveRunResponse:
+    """Delete a saved run file."""
+
+    try:
+        path = delete_run_file(filename)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    return SaveRunResponse(
+        file_name=path.name,
+        modified="Deleted",
     )

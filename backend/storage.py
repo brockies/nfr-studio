@@ -589,6 +589,18 @@ def rename_run_file(current_filename: str, new_filename: str) -> Path:
     return new_path
 
 
+def delete_run_file(filename: str) -> Path:
+    """Delete an existing saved run file."""
+
+    safe_name = sanitize_filename(filename)
+    path = SAVE_DIR / safe_name
+    if not path.exists():
+        raise FileNotFoundError(f"`{safe_name}` was not found.")
+
+    path.unlink()
+    return path
+
+
 def load_saved_run(filename: str) -> tuple[Path, RunPayload]:
     """Load a saved run from disk and convert it to the transport model."""
 

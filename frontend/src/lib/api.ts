@@ -74,6 +74,13 @@ export async function renameSavedRun(currentFilename: string, newFilename: strin
   return parseResponse<SaveRunResponse>(response);
 }
 
+export async function deleteSavedRun(filename: string) {
+  const response = await safeFetch(`${API_BASE}/api/saved-runs/${encodeURIComponent(filename)}`, {
+    method: "DELETE"
+  });
+  return parseResponse<SaveRunResponse>(response);
+}
+
 export async function askFollowUp(run: RunPayload, question: string, history: ChatMessage[]) {
   const response = await safeFetch(`${API_BASE}/api/follow-up`, {
     method: "POST",
