@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from openai import OpenAI
+from backend.framework_packs import get_framework_pack
+from backend.industry_profiles import get_industry_profile
 
 
 MODEL_NAME = "gpt-4o"
@@ -343,6 +345,7 @@ For each framework use this structure:
 - **[Framework]** - Applicability: `Applicable | Potentially Applicable | Not Applicable`
   - Why it matters here
   - Confidence note if relevance is inferred from limited context
+  - What would improve confidence
 
 ### Mapping Matrix
 
@@ -353,6 +356,11 @@ For each framework use this structure:
 
 | Priority | NFR / Theme | Evidence Required | Suggested Owner | Suggested Delivery Stage |
 |----------|--------------|-------------------|-----------------|--------------------------|
+
+### Evidence Crosswalks
+
+| Evidence Artifact | Supports Frameworks | Control Themes | Usage Scope | Notes |
+|-------------------|---------------------|----------------|-------------|-------|
 
 ### Proof Gaps
 Short list of notable areas where a requirement appears to exist but the proof plan is weak or missing.
@@ -614,8 +622,36 @@ def remediate_nfrs(system_description: str, nfrs: str, supporting_analysis: str)
     )
 
 
-def map_compliance(system_description: str, nfrs: str, supporting_analysis: str = "") -> AgentRunResult:
+def map_compliance(
+    system_description: str,
+    nfrs: str,
+    supporting_analysis: str = "",
+    framework_pack: str = "core_saas",
+    industry_profile: str = "saas",
+) -> AgentRunResult:
     """Agent 6: Map NFR content to common compliance frameworks."""
+    pack = get_framework_pack(framework_pack)
+    profile = get_industry_profile(industry_profile)
+    pack_context = "\n".join(
+        [
+            "## Selected Framework Pack",
+            f"Name: {pack.label}",
+            "Curated frameworks:",
+            *[f"- {framework}" for framework in pack.frameworks],
+            f"Guidance: {pack.guidance}",
+        ]
+    )
+    profile_context = "\n".join(
+        [
+            "## Selected Industry Profile",
+            f"Name: {profile.label}",
+            "Likely NFR themes:",
+            *[f"- {theme}" for theme in profile.likely_nfr_themes],
+            "Likely evidence artefacts:",
+            *[f"- {artifact}" for artifact in profile.likely_evidence],
+            f"Guidance: {profile.guidance}",
+        ]
+    )
     return _call_openai(
         COMPLIANCE_MAPPING_PROMPT,
         f"""Please map the following material to relevant compliance frameworks.
@@ -628,6 +664,10 @@ def map_compliance(system_description: str, nfrs: str, supporting_analysis: str 
 
 ## Supporting Analysis
 {supporting_analysis}
+
+{pack_context}
+
+{profile_context}
 """,
         max_tokens=2500,
     )

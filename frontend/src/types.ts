@@ -22,6 +22,8 @@ export type RunPayload = {
   system_description: string;
   existing_nfrs: string;
   project_name: string;
+  framework_pack: string;
+  industry_profile: string;
   attachment_context: string;
   result_source: "fresh" | "loaded" | "refined";
   results: Record<string, string>;
@@ -59,6 +61,7 @@ export type RunPayload = {
     applicability: string;
     rationale: string;
     confidence_note: string;
+    confidence_improvement: string;
   }[];
   compliance_mappings: {
     framework: string;
@@ -77,6 +80,13 @@ export type RunPayload = {
     evidence_required: string;
     suggested_owner: string;
     suggested_delivery_stage: string;
+  }[];
+  evidence_crosswalks: {
+    evidence_artifact: string;
+    supports_frameworks: string;
+    control_themes: string;
+    usage_scope: string;
+    notes: string;
   }[];
   proof_gaps: string[];
 };
@@ -112,6 +122,18 @@ export type RunJobStatus = {
   status: RunJobState;
   run: RunPayload | null;
   error: string;
+};
+
+export type FrameworkPackOption = {
+  key: string;
+  label: string;
+  description: string;
+};
+
+export type IndustryProfileOption = {
+  key: string;
+  label: string;
+  description: string;
 };
 
 export type RedactionPreview = {

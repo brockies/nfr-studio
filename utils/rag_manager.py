@@ -25,10 +25,9 @@ from openai import OpenAI
 from .chunking import chunk_markdown
 
 
-KB_ROOT = Path("knowledge_base")
 DEFAULT_CHROMA_DIR = Path(".chroma")
-DEFAULT_COLLECTION = "nfr_kb"
 PROJECT_COLLECTION_PREFIX = "project_kb__"
+LEGACY_SHARED_COLLECTIONS = {"nfr_kb"}
 
 _EMBED_CACHE: dict[str, list[float]] = {}
 _RETRIEVE_CACHE: dict[str, tuple[float, list["RagHit"]]] = {}
@@ -262,7 +261,7 @@ def get_embedder(provider: EmbedProvider | None = None) -> Embedder:
 def get_chroma_collection(
     *,
     persist_dir: Path = DEFAULT_CHROMA_DIR,
-    collection_name: str = DEFAULT_COLLECTION,
+    collection_name: str,
 ):
     chromadb = _try_import_chroma()
     from chromadb import PersistentClient  # type: ignore
@@ -274,6 +273,31 @@ def get_chroma_collection(
         settings=Settings(anonymized_telemetry=False),
     )
     return client.get_or_create_collection(name=collection_name)
+
+
+def get_chroma_client(*, persist_dir: Path = DEFAULT_CHROMA_DIR):
+    """Return a persistent Chroma client for collection-level inspection."""
+
+    _try_import_chroma()
+    from chromadb import PersistentClient  # type: ignore
+    from chromadb.config import Settings  # type: ignore
+
+    persist_dir.mkdir(parents=True, exist_ok=True)
+    return PersistentClient(
+        path=str(persist_dir),
+        settings=Settings(anonymized_telemetry=False),
+    )
+
+
+def retire_legacy_shared_collections(*, persist_dir: Path = DEFAULT_CHROMA_DIR) -> None:
+    """Remove deprecated shared collections from the local Chroma store."""
+
+    client = get_chroma_client(persist_dir=persist_dir)
+    for collection_name in LEGACY_SHARED_COLLECTIONS:
+        try:
+            client.delete_collection(name=collection_name)
+        except Exception:
+            continue
 
 
 def sanitize_collection_slug(value: str) -> str:
@@ -297,7 +321,7 @@ def project_collection_name(project_name: str) -> str:
 def collection_count(
     *,
     persist_dir: Path = DEFAULT_CHROMA_DIR,
-    collection_name: str = DEFAULT_COLLECTION,
+    collection_name: str,
 ) -> int:
     """Return the current document count for a collection, or zero if unavailable."""
 
@@ -306,143 +330,6 @@ def collection_count(
         return int(collection.count())
     except Exception:
         return 0
-
-
-def knowledge_base_files(root: Path = KB_ROOT) -> list[Path]:
-    projects = sorted((root / "projects").glob("*.md"))
-    compliance = sorted((root / "compliance").glob("*.md"))
-    return [*projects, *compliance]
-
-
-def list_knowledge_base_files(root: Path = KB_ROOT) -> list[dict[str, Any]]:
-    """Return a list of knowledge base markdown files with parsed frontmatter."""
-
-    items: list[dict[str, Any]] = []
-    for path in knowledge_base_files(root):
-        try:
-            raw = path.read_text(encoding="utf-8")
-        except Exception:
-            continue
-
-        meta, _body = parse_frontmatter(raw)
-        stat = path.stat()
-
-        # Normalize fields we care about for UX.
-        tech_stack_value = meta.get("tech_stack") or []
-        if isinstance(tech_stack_value, str):
-            tech_stack: list[str] = [tech_stack_value]
-        else:
-            tech_stack = [str(item) for item in (tech_stack_value or []) if str(item).strip()]
-
-        lessons_value = meta.get("lessons") or []
-        if isinstance(lessons_value, str):
-            lessons: list[str] = [lessons_value]
-        else:
-            lessons = [str(item) for item in (lessons_value or []) if str(item).strip()]
-
-        items.append(
-            {
-                "target": path.parent.name,  # projects|compliance
-                "filename": path.name,
-                "relative_path": str(path.as_posix()),
-                "project_id": str(meta.get("project_id") or path.stem),
-                "industry": str(meta.get("industry") or ""),
-                "tech_stack": tech_stack,
-                "scale": str(meta.get("scale") or ""),
-                "lessons": lessons,
-                "modified": int(stat.st_mtime),
-                "bytes": int(stat.st_size),
-            }
-        )
-
-    items.sort(key=lambda item: (item["target"], item["project_id"]))
-    return items
-
-
-def ingest_knowledge_base(
-    *,
-    kb_root: Path = KB_ROOT,
-    persist_dir: Path = DEFAULT_CHROMA_DIR,
-    collection_name: str = DEFAULT_COLLECTION,
-    provider: EmbedProvider | None = None,
-    chunk_size_tokens: int = 800,
-    chunk_overlap_tokens: int = 120,
-) -> dict[str, Any]:
-    """Ingest knowledge_base markdown into ChromaDB (idempotent per chunk id)."""
-
-    files = knowledge_base_files(kb_root)
-    if not files:
-        return {"indexed": False, "reason": "No knowledge base files found.", "chunk_count": 0}
-
-    collection = get_chroma_collection(persist_dir=persist_dir, collection_name=collection_name)
-    embedder = get_embedder(provider)
-
-    ids: list[str] = []
-    documents: list[str] = []
-    metadatas: list[dict[str, Any]] = []
-
-    for path in files:
-        raw = path.read_text(encoding="utf-8")
-        fm, body = parse_frontmatter(raw)
-        project_id = str(fm.get("project_id") or path.stem).strip()
-        industry = str(fm.get("industry") or "").strip()
-        tech_stack = _normalise_list(fm.get("tech_stack") or [])
-        scale = str(fm.get("scale") or "").strip()
-        lessons = _normalise_list(fm.get("lessons") or [])
-
-        # Derive required metadata fields.
-        project_type = "retail_ecom_project" if path.parent.name == "projects" else "compliance"
-
-        chunks = chunk_markdown(
-            body,
-            chunk_size_tokens=chunk_size_tokens,
-            chunk_overlap_tokens=chunk_overlap_tokens,
-        )
-
-        for chunk in chunks:
-            chunk_id = _hash_id(str(path), project_id, str(chunk.index))
-            nfr_category = _infer_nfr_category(chunk.text)
-            ids.append(chunk_id)
-            documents.append(chunk.text)
-            metadatas.append(
-                {
-                    "project_id": project_id,
-                    "project_type": project_type,
-                    "industry": industry,
-                    "tech_stack": tech_stack,
-                    "scale": scale,
-                    "lessons": lessons,
-                    # Keep room for future enrichment.
-                    "nfr_category": nfr_category,
-                    "lesson_learned": lessons,
-                    "source_path": str(path),
-                    "chunk_index": chunk.index,
-                }
-            )
-
-    embeddings = embedder.embed(documents) if documents else []
-
-    # We overwrite by deleting existing ids first to keep idempotency on content updates.
-    # Chroma add() errors if ids exist.
-    if ids:
-        try:
-            collection.delete(ids=ids)
-        except Exception:
-            pass
-
-    if ids:
-        collection.add(ids=ids, documents=documents, metadatas=metadatas, embeddings=embeddings)
-
-    index_info = {
-        "indexed": True,
-        "chunk_count": len(ids),
-        "file_count": len(files),
-        "provider": provider or os.getenv("RAG_EMBEDDINGS_PROVIDER", "openai"),
-        "collection": collection_name,
-        "persist_dir": str(persist_dir),
-    }
-    (kb_root / "index.json").write_text(json.dumps(index_info, indent=2), encoding="utf-8")
-    return index_info
 
 
 def ingest_project_documents(
@@ -530,61 +417,115 @@ def ingest_project_documents(
     }
 
 
-def kb_status(
-    *,
-    kb_root: Path = KB_ROOT,
-    persist_dir: Path = DEFAULT_CHROMA_DIR,
-    collection_name: str = DEFAULT_COLLECTION,
-) -> dict[str, Any]:
-    files = knowledge_base_files(kb_root)
-    status: dict[str, Any] = {"file_count": len(files), "indexed": False, "chunk_count": 0}
+def kb_status(*, persist_dir: Path = DEFAULT_CHROMA_DIR) -> dict[str, Any]:
+    """Return a project-scoped vector store summary."""
 
-    index_path = kb_root / "index.json"
-    if index_path.exists():
-        try:
-            status.update(json.loads(index_path.read_text(encoding="utf-8")))
-        except Exception:
-            pass
+    status: dict[str, Any] = {
+        "indexed": False,
+        "chunk_count": 0,
+        "collection_count": 0,
+    }
 
     try:
-        collection = get_chroma_collection(persist_dir=persist_dir, collection_name=collection_name)
-        status["indexed"] = True
-        status["chunk_count"] = int(collection.count())
+        retire_legacy_shared_collections(persist_dir=persist_dir)
+        collections = list_chroma_collections(persist_dir=persist_dir)
+        project_collections = [item for item in collections if item.get("scope") == "project"]
+        status["indexed"] = bool(project_collections)
+        status["collection_count"] = len(project_collections)
+        status["chunk_count"] = sum(int(item.get("chunk_count") or 0) for item in project_collections)
     except RagUnavailable:
         status["indexed"] = False
         status["reason"] = "ChromaDB not installed."
     except Exception:
         status["indexed"] = False
-        status["reason"] = "Could not access Chroma collection."
+        status["reason"] = "Could not access project collections."
 
     return status
+
+
+def list_chroma_collections(*, persist_dir: Path = DEFAULT_CHROMA_DIR) -> list[dict[str, Any]]:
+    """Return visible Chroma collections with lightweight stats."""
+
+    retire_legacy_shared_collections(persist_dir=persist_dir)
+    client = get_chroma_client(persist_dir=persist_dir)
+    collections = client.list_collections()
+    items: list[dict[str, Any]] = []
+
+    for collection in collections:
+        name = getattr(collection, "name", "")
+        count = 0
+        try:
+            count = int(collection.count())
+        except Exception:
+            count = 0
+
+        if name.startswith(PROJECT_COLLECTION_PREFIX):
+            scope = "project"
+        else:
+            scope = "other"
+
+        items.append(
+            {
+                "name": name,
+                "scope": scope,
+                "chunk_count": count,
+            }
+        )
+
+    items = [item for item in items if item["scope"] == "project"]
+    items.sort(key=lambda item: item["name"])
+    return items
+
+
+def preview_chroma_collection(
+    collection_name: str,
+    *,
+    persist_dir: Path = DEFAULT_CHROMA_DIR,
+    limit: int = 12,
+) -> dict[str, Any]:
+    """Return a lightweight preview of documents and metadata in one collection."""
+
+    collection_name = collection_name.strip()
+    if not collection_name:
+        raise ValueError("Collection name is required.")
+
+    collection = get_chroma_collection(persist_dir=persist_dir, collection_name=collection_name)
+    count = int(collection.count())
+    result = collection.get(limit=max(1, limit), include=["documents", "metadatas"])
+    documents = result.get("documents") or []
+    metadatas = result.get("metadatas") or []
+    ids = result.get("ids") or []
+
+    items: list[dict[str, Any]] = []
+    for index, doc in enumerate(documents):
+        metadata = dict(metadatas[index] or {}) if index < len(metadatas) else {}
+        text = str(doc or "").strip()
+        items.append(
+            {
+                "id": str(ids[index]) if index < len(ids) else _hash_id(collection_name, str(index)),
+                "document_preview": (text[:320].rstrip() + "...") if len(text) > 320 else text,
+                "metadata": metadata,
+            }
+        )
+
+    return {
+        "collection": collection_name,
+        "chunk_count": count,
+        "items": items,
+    }
 
 
 def retrieve(
     query: str,
     *,
     top_k: int = 5,
-    kb_root: Path = KB_ROOT,
     persist_dir: Path = DEFAULT_CHROMA_DIR,
-    collection_name: str = DEFAULT_COLLECTION,
     provider: EmbedProvider | None = None,
 ) -> list[RagHit]:
-    """Retrieve top-k relevant chunks for a query."""
+    """Compatibility shim: shared knowledge-base retrieval has been retired."""
 
-    if not (kb_root / "projects").exists():
-        return []
-
-    if collection_count(persist_dir=persist_dir, collection_name=collection_name) == 0:
-        # Auto-ingest for local dev convenience.
-        ingest_knowledge_base(kb_root=kb_root, persist_dir=persist_dir, collection_name=collection_name, provider=provider)
-
-    return _retrieve_from_collection(
-        query,
-        top_k=top_k,
-        persist_dir=persist_dir,
-        collection_name=collection_name,
-        provider=provider,
-    )
+    _ = (query, top_k, persist_dir, provider)
+    return []
 
 
 def retrieve_project_documents(
@@ -717,7 +658,7 @@ def format_retrieved_context(hits: list[RagHit]) -> str:
         lines.extend(
             [
                 f"### Source: {project_id}",
-                f"- Scope: {'Project-specific attachments' if scope == 'project' else 'Shared knowledge base'}",
+                f"- Scope: {'Project-specific retrieval context' if scope == 'project' else 'Other collection'}",
                 f"- File: {source_path}",
                 f"- Industry: {industry}",
                 f"- Tech stack: {tech_stack}",

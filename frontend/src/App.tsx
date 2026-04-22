@@ -53,7 +53,13 @@ import type {
   UsageTotals,
   ValidationInsights,
 } from "@/lib/analysis";
-import type { ChatMessage, Mode, RunJobStatus, RunPayload, SavedRunSummary } from "@/types";
+import type {
+  ChatMessage,
+  Mode,
+  RunJobStatus,
+  RunPayload,
+  SavedRunSummary
+} from "@/types";
 
 const GENERATE_PLACEHOLDER =
   "Example: A high-volume e-commerce order management system processing around 50,000 orders per day. The platform is split across Orders, Payments, Inventory, and Notifications services, deployed on AKS in UK South. It exposes APIs to partner retailers and must handle 5x seasonal peak traffic.";
@@ -66,7 +72,107 @@ const MODE_SUBTITLE: Record<Mode, string> = {
   validate: "Review an existing NFR set and expose the gaps."
 };
 
-type PrivacyMode = "openai" | "local";
+type PrivacyMode = "openai" | "local" | "private";
+
+type PrivacyModeDefinition = {
+  key: PrivacyMode;
+  toggleLabel: string;
+  title: string;
+  description: string;
+};
+
+const PRIVACY_MODES: PrivacyModeDefinition[] = [
+  {
+    key: "openai",
+    toggleLabel: "Cloud",
+    title: "OpenAI",
+    description: "Fast hosted path for standard cloud inference."
+  },
+  {
+    key: "local",
+    toggleLabel: "Local",
+    title: "Llama or similar",
+    description: "On-device or private-hosted inference for tighter data control."
+  },
+  {
+    key: "private",
+    toggleLabel: "Private",
+    title: "Bedrock or equivalent",
+    description: "Enterprise-style isolated deployment path for higher privacy expectations."
+  }
+];
+
+type AssessmentProfileDefinition = {
+  key: string;
+  label: string;
+  description: string;
+  frameworkPack: string;
+  industryProfile: string;
+};
+
+const ASSESSMENT_PROFILES: AssessmentProfileDefinition[] = [
+  {
+    key: "core_saas",
+    label: "Core SaaS",
+    description: "Balanced baseline for enterprise SaaS products handling security, privacy, and resilience concerns.",
+    frameworkPack: "core_saas",
+    industryProfile: "saas",
+  },
+  {
+    key: "ai_saas",
+    label: "AI SaaS",
+    description: "Enterprise SaaS with added emphasis on AI governance, transparency, oversight, and provider risk.",
+    frameworkPack: "ai_product",
+    industryProfile: "ai_saas",
+  },
+  {
+    key: "ecommerce",
+    label: "Ecommerce",
+    description: "Customer-facing commerce focus with stronger emphasis on payments, peak scale, resilience, and data handling.",
+    frameworkPack: "ecommerce",
+    industryProfile: "ecommerce",
+  },
+  {
+    key: "fintech",
+    label: "Fintech",
+    description: "Regulated financial platform focus with stronger resilience, auditability, change control, and governance expectations.",
+    frameworkPack: "fintech",
+    industryProfile: "fintech",
+  },
+  {
+    key: "healthtech",
+    label: "Healthtech",
+    description: "Health-related systems with emphasis on sensitive data handling, traceability, access control, and safety-aware operations.",
+    frameworkPack: "health",
+    industryProfile: "healthtech",
+  },
+  {
+    key: "public_sector",
+    label: "Public Sector",
+    description: "Public-service systems with emphasis on accessibility, resilience, supplier assurance, and strong governance evidence.",
+    frameworkPack: "public_sector",
+    industryProfile: "public_sector",
+  }
+];
+
+function inferAssessmentProfileKey(frameworkPack: string, industryProfile: string): string {
+  const exactMatch = ASSESSMENT_PROFILES.find(
+    (profile) =>
+      profile.frameworkPack === frameworkPack && profile.industryProfile === industryProfile,
+  );
+
+  if (exactMatch) {
+    return exactMatch.key;
+  }
+
+  const profileMatch = ASSESSMENT_PROFILES.find((profile) => profile.industryProfile === industryProfile);
+  if (profileMatch) {
+    return profileMatch.key;
+  }
+
+  const packMatch = ASSESSMENT_PROFILES.find((profile) => profile.frameworkPack === frameworkPack);
+  return packMatch?.key ?? "core_saas";
+}
 
 function metricsForRun(run: RunPayload | null) {
   if (!run) {
@@ -108,6 +214,9 @@ export default function App() {
   const [projectName, setProjectName] = useState("");
   const [systemDescription, setSystemDescription] = useState("");
   const [existingNfrs, setExistingNfrs] = useState("");
+  const [assessmentProfile, setAssessmentProfile] = useState("core_saas");
+  const [frameworkPack, setFrameworkPack] = useState("core_saas");
+  const [industryProfile, setIndustryProfile] = useState("saas");
   const [files, setFiles] = useState<File[]>([]);
   const [run, setRun] = useState<RunPayload | null>(null);
   const [activeJob, setActiveJob] = useState<RunJobStatus | null>(null);
@@ -233,6 +342,10 @@ export default function App() {
     () => (run?.mode === "validate" ? parseValidationInsights(run.results.validate ?? "") : null),
     [run],
   );
+  const selectedPrivacyMode = useMemo(
+    () => PRIVACY_MODES.find((modeItem) => modeItem.key === privacyMode) ?? PRIVACY_MODES[0],
+    [privacyMode],
+  );
   const showRunSidebar = loading || Boolean(activeJob) || Boolean(run);
   const showPipelineProgress = loading || progressMode === mode || Boolean(displayedRun);
   const filteredSavedRuns = useMemo(() => {
@@ -255,6 +368,14 @@ export default function App() {
   }, [savedRuns, savedRunQuery]);
   const groupedSavedRuns = useMemo(() => groupSavedRuns(filteredSavedRuns), [filteredSavedRuns]);
 
+  function handleAssessmentProfileChange(nextProfileKey: string) {
+    const nextProfile =
+      ASSESSMENT_PROFILES.find((profile) => profile.key === nextProfileKey) ?? ASSESSMENT_PROFILES[0];
+    setAssessmentProfile(nextProfile.key);
+    setFrameworkPack(nextProfile.frameworkPack);
+    setIndustryProfile(nextProfile.industryProfile);
+  }
+
   async function refreshSavedRuns() {
     const items = await fetchSavedRuns();
     setSavedRuns(items);
@@ -274,12 +395,16 @@ export default function App() {
           ? await startGenerateRun({
               systemDescription,
               projectName,
+              frameworkPack,
+              industryProfile,
               files
             })
           : await startValidateRun({
               systemDescription,
               existingNfrs,
               projectName,
+              frameworkPack,
+              industryProfile,
               files
             });
 
@@ -304,6 +429,11 @@ export default function App() {
         setRun(nextRun);
         setMode(nextRun.mode);
         setProjectName(nextRun.project_name);
+        setAssessmentProfile(
+          inferAssessmentProfileKey(nextRun.framework_pack || "core_saas", nextRun.industry_profile || "saas"),
+        );
+        setFrameworkPack(nextRun.framework_pack || "core_saas");
+        setIndustryProfile(nextRun.industry_profile || "saas");
         setSystemDescription(nextRun.system_description);
         setExistingNfrs(nextRun.existing_nfrs);
         setFiles([]);
@@ -419,10 +549,10 @@ export default function App() {
   }
 
   return (
-	    <div className="mx-auto flex min-h-screen max-w-[1760px] gap-5 px-4 py-5 lg:px-6">
+	    <div className="mx-auto flex min-h-screen max-w-[1760px] gap-5 overflow-x-hidden px-4 py-2 lg:px-6">
 		      <aside className="hidden w-[320px] shrink-0 lg:block xl:w-[340px]">
-	        <div className="glass-panel sticky top-6 h-[calc(100vh-3rem)] overflow-y-auto rounded-[32px] border border-white/70 p-5 shadow-panel">
-	          <div className="mb-6 shrink-0">
+	        <div className="glass-panel sticky top-1 h-[calc(100vh-0.5rem)] overflow-y-auto rounded-[32px] border border-white/70 p-4 shadow-panel">
+	          <div className="mb-4 shrink-0">
 	            <div className="flex items-center gap-3">
 	              <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-100 text-sky-700">
 	                <Sparkles className="h-6 w-6" />
@@ -434,7 +564,7 @@ export default function App() {
 	            </p>
 	          </div>
 
-	          <div className="shrink-0 space-y-3">
+	          <div className="shrink-0 space-y-2.5">
 	            <Button
 	              className="w-full justify-start"
 	              variant={activePage === "studio" && mode === "generate" ? "default" : "outline"}
@@ -463,11 +593,11 @@ export default function App() {
 	              onClick={() => setActivePage("kb")}
 	            >
 	              <Library className="mr-2 h-4 w-4" />
-	              Knowledge Base
+	              Project Collections
 	            </Button>
 	          </div>
 
-          <Separator className="my-6" />
+          <Separator className="my-4" />
 
           <div className="shrink-0 space-y-3">
             <Input
@@ -477,17 +607,17 @@ export default function App() {
             />
           </div>
 
-          <Separator className="my-6" />
+          <Separator className="my-4" />
 
           <div>
             <div className="mb-3 flex items-center justify-between">
               <div className="text-sm font-semibold">Saved Runs</div>
               {loadingSavedRuns ? <LoaderCircle className="h-4 w-4 animate-spin text-muted-foreground" /> : null}
             </div>
-            <p className="mb-4 text-sm leading-6 text-muted-foreground">
+            <p className="mb-3 text-sm leading-6 text-muted-foreground">
               Open a previous run without re-running the pipeline.
             </p>
-            <div className="space-y-3">
+            <div className="space-y-2">
               {savedRuns.length === 0 && !loadingSavedRuns ? (
                 <div className="rounded-[24px] border border-dashed border-border p-4 text-sm text-muted-foreground">
                   No saved runs yet.
@@ -608,7 +738,7 @@ export default function App() {
         </div>
       </aside>
 
-	      <main className="flex-1 space-y-4">
+	      <main className="min-w-0 flex-1 space-y-4">
 	        {error ? <div className="rounded-[20px] border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 	        {status ? <div className="rounded-[20px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{status}</div> : null}
 
@@ -617,8 +747,8 @@ export default function App() {
 	        ) : null}
 
 	        {activePage === "studio" ? (
-	        <div className={`grid gap-5 ${showRunSidebar ? "2xl:grid-cols-[1.05fr_0.95fr]" : ""}`}>
-	          <Card className="glass-panel">
+	        <div className={`grid min-w-0 gap-5 ${showRunSidebar ? "2xl:grid-cols-[1.05fr_0.95fr]" : ""}`}>
+	          <Card className="glass-panel min-w-0">
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="space-y-2">
@@ -651,52 +781,78 @@ export default function App() {
             </CardHeader>
             <CardContent className="space-y-4 pt-0">
               <div className="rounded-[24px] border border-slate-200 bg-slate-50 px-4 py-4">
-                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
-                      Privacy Mode
+                <div className="space-y-3">
+                  <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0 xl:max-w-[60%]">
+                      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                        Privacy Mode
+                      </div>
+                      <div className="mt-1 text-sm text-slate-700">
+                        Choose the model deployment path that best fits the privacy expectations for this run.
+                      </div>
                     </div>
-                    <div className="mt-1 text-sm text-slate-700">
-                      Choose whether this run should use a cloud-hosted model or a local model.
-                    </div>
-                    <div className="mt-1 text-xs text-slate-500">
-                      UI-only for now. This does not change backend routing yet.
+                    <div className="inline-flex w-fit self-start rounded-full border border-slate-200 bg-white p-1 shadow-sm xl:self-auto">
+                      {PRIVACY_MODES.map((modeItem) => (
+                        <button
+                          key={modeItem.key}
+                          type="button"
+                          className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
+                            privacyMode === modeItem.key
+                              ? modeItem.key === "local"
+                                ? "bg-emerald-600 text-white"
+                                : modeItem.key === "private"
+                                  ? "bg-sky-700 text-white"
+                                  : "bg-slate-900 text-white"
+                              : "text-slate-600 hover:bg-slate-100"
+                          }`}
+                          onClick={() => setPrivacyMode(modeItem.key)}
+                        >
+                          {modeItem.toggleLabel}
+                        </button>
+                      ))}
                     </div>
                   </div>
-                  <div className="inline-flex rounded-full border border-slate-200 bg-white p-1 shadow-sm">
-                    <button
-                      type="button"
-                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                        privacyMode === "openai"
-                          ? "bg-slate-900 text-white"
-                          : "text-slate-600 hover:bg-slate-100"
-                      }`}
-                      onClick={() => setPrivacyMode("openai")}
-                    >
-                      Cloud LLM
-                    </button>
-                    <button
-                      type="button"
-                      className={`rounded-full px-4 py-2 text-sm font-semibold transition ${
-                        privacyMode === "local"
-                          ? "bg-emerald-600 text-white"
-                          : "text-slate-600 hover:bg-slate-100"
-                      }`}
-                      onClick={() => setPrivacyMode("local")}
-                    >
-                      Local LLM
-                    </button>
+                  <div className="text-xs leading-5 text-slate-500">
+                    <span className="font-semibold text-slate-700">{selectedPrivacyMode.title}:</span>{" "}
+                    {selectedPrivacyMode.description} UI-only for now. This does not change backend routing yet.
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-sm font-semibold">Project</label>
-                <Input
-                  placeholder="Payments Modernisation"
-                  value={projectName}
-                  onChange={(event) => setProjectName(event.target.value)}
-                />
+              <div className="grid gap-4 xl:grid-cols-[1.25fr_1fr]">
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold">Project</label>
+                  <Input
+                    placeholder="Payments Modernisation"
+                    value={projectName}
+                    onChange={(event) => setProjectName(event.target.value)}
+                  />
+                  <div className="text-xs leading-5 text-slate-500">
+                    Optional label used for saved runs and project-scoped retrieval context.
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-semibold">Assessment profile</label>
+                  <select
+                    className="flex h-11 w-full rounded-[18px] border border-input bg-background px-3 py-2 text-sm ring-offset-background transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300"
+                    value={assessmentProfile}
+                    onChange={(event) => handleAssessmentProfileChange(event.target.value)}
+                  >
+                    {ASSESSMENT_PROFILES.map((profile) => (
+                      <option key={profile.key} value={profile.key}>
+                        {profile.label}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="text-xs leading-5 text-slate-500">
+                    Choose the lens that should steer likely frameworks, NFR themes, and evidence expectations for this run.
+                  </div>
+                  <div className="text-xs leading-5 text-slate-500">
+                    {ASSESSMENT_PROFILES.find((profile) => profile.key === assessmentProfile)?.description ??
+                      "Choose the lens that should bias likely frameworks, NFR themes, and evidence expectations."}
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-2">
@@ -772,6 +928,7 @@ export default function App() {
                   onClick={() => {
                     setSystemDescription("");
                     setExistingNfrs("");
+                    handleAssessmentProfileChange("core_saas");
                     setFiles([]);
                     setActiveJob(null);
                     setLoading(false);
@@ -787,7 +944,7 @@ export default function App() {
           </Card>
 
           {showRunSidebar ? (
-            <div className="space-y-6">
+            <div className="min-w-0 space-y-6">
               {showPipelineProgress ? (
                 <PipelineProgress
                   mode={progressMode}

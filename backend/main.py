@@ -11,6 +11,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from .jobs import complete_job, create_job, fail_job, get_job, update_job
+from .framework_packs import framework_pack_options
+from .industry_profiles import industry_profile_options
 from .models import (
     FollowUpRequest,
     FollowUpResponse,
@@ -42,7 +44,11 @@ from .storage import list_saved_runs, load_saved_run, rename_run_file, save_run_
 from utils.redaction import redact_text
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
 
-from utils.rag_manager import ingest_knowledge_base, kb_status, list_knowledge_base_files
+from utils.rag_manager import (
+    kb_status,
+    list_chroma_collections,
+    preview_chroma_collection,
+)
 
 
 app = FastAPI(
@@ -74,23 +80,48 @@ def healthcheck() -> dict[str, str]:
 
 @app.get("/api/kb/status")
 def knowledge_base_status() -> dict[str, object]:
-    """Return basic knowledge base and vector index status."""
+    """Return current project-scoped vector store status."""
 
     return kb_status()
 
 
 @app.post("/api/kb/ingest")
 def ingest_knowledge_base_now() -> dict[str, object]:
-    """(Re)ingest the knowledge base into the local ChromaDB store."""
+    """Retired shared knowledge base ingestion endpoint."""
 
-    return ingest_knowledge_base()
+    raise HTTPException(
+        status_code=410,
+        detail="Shared knowledge base ingestion has been retired. Uploaded documents are now kept project-specific.",
+    )
 
 
 @app.get("/api/kb/files", response_model=list[KnowledgeBaseFile])
 def list_kb_files() -> list[KnowledgeBaseFile]:
-    """List knowledge base markdown files and their metadata."""
+    """Retired shared knowledge base listing endpoint."""
 
-    return [KnowledgeBaseFile(**item) for item in list_knowledge_base_files()]
+    return []
+
+
+@app.get("/api/kb/chroma/collections")
+def chroma_collections() -> list[dict[str, object]]:
+    """List the visible Chroma collections and their counts."""
+
+    try:
+        return list_chroma_collections()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/kb/chroma/collections/{collection_name}")
+def chroma_collection_preview(collection_name: str, limit: int = 12) -> dict[str, object]:
+    """Preview stored documents and metadata for one Chroma collection."""
+
+    try:
+        return preview_chroma_collection(collection_name, limit=limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.post("/api/kb/upload")
@@ -98,26 +129,26 @@ async def upload_knowledge_base_project(
     project_file: UploadFile = File(...),
     target: str = Form("projects"),
 ) -> dict[str, object]:
-    """Upload a markdown knowledge base file and re-ingest.
+    """Retired shared knowledge base upload endpoint."""
 
-    `target` should be "projects" or "compliance".
-    """
+    raise HTTPException(
+        status_code=410,
+        detail="Shared knowledge base uploads have been retired. Use project attachments within a run instead.",
+    )
 
-    if not project_file.filename or not project_file.filename.lower().endswith(".md"):
-        raise HTTPException(status_code=400, detail="Please upload a .md file.")
 
-    safe_target = "projects" if target not in {"projects", "compliance"} else target
-    dest_dir = Path("knowledge_base") / safe_target
-    dest_dir.mkdir(parents=True, exist_ok=True)
+@app.get("/api/framework-packs")
+def list_framework_packs() -> list[dict[str, str]]:
+    """Return the selectable framework pack definitions for the UI."""
 
-    payload = await project_file.read()
-    if not payload:
-        raise HTTPException(status_code=400, detail="Uploaded file was empty.")
+    return framework_pack_options()
 
-    dest_path = dest_dir / Path(project_file.filename).name
-    dest_path.write_bytes(payload)
 
-    return ingest_knowledge_base()
+@app.get("/api/industry-profiles")
+def list_industry_profiles() -> list[dict[str, str]]:
+    """Return the selectable industry profile definitions for the UI."""
+
+    return industry_profile_options()
 
 
 async def _run_generate_job(
@@ -125,6 +156,8 @@ async def _run_generate_job(
     *,
     system_description: str,
     project_name: str,
+    framework_pack: str,
+    industry_profile: str,
     attachments,
 ) -> None:
     """Execute a generate job in the background and publish progress."""
@@ -134,6 +167,8 @@ async def _run_generate_job(
             run_generate_pipeline_sync,
             system_description=system_description,
             project_name=project_name,
+            framework_pack=framework_pack,
+            industry_profile=industry_profile,
             attachments=attachments,
             on_progress=lambda run: update_job(job_id, run),
         )
@@ -148,6 +183,8 @@ async def _run_validate_job(
     system_description: str,
     existing_nfrs: str,
     project_name: str,
+    framework_pack: str,
+    industry_profile: str,
     attachments,
 ) -> None:
     """Execute a validate job in the background and publish progress."""
@@ -158,6 +195,8 @@ async def _run_validate_job(
             system_description=system_description,
             existing_nfrs=existing_nfrs,
             project_name=project_name,
+            framework_pack=framework_pack,
+            industry_profile=industry_profile,
             attachments=attachments,
             on_progress=lambda run: update_job(job_id, run),
         )
@@ -177,6 +216,8 @@ def preview_redaction(request: RedactionRequest) -> RedactionPreview:
 async def start_generate_run(
     system_description: str = Form(...),
     project_name: str = Form(""),
+    framework_pack: str = Form("core_saas"),
+    industry_profile: str = Form("saas"),
     attachments: list[UploadFile] | None = File(default=None),
 ) -> RunJobStatus:
     """Queue a generate workflow and return a pollable job id."""
@@ -191,6 +232,8 @@ async def start_generate_run(
             mode="generate",
             system_description=processed_system_description,
             project_name=project_name.strip(),
+            framework_pack=framework_pack.strip(),
+            industry_profile=industry_profile.strip(),
         )
         initial_run.agent_states = build_agent_states("generate")
         job = create_job("generate", initial_run)
@@ -199,6 +242,8 @@ async def start_generate_run(
                 job.job_id,
                 system_description=processed_system_description,
                 project_name=project_name.strip(),
+                framework_pack=framework_pack.strip(),
+                industry_profile=industry_profile.strip(),
                 attachments=buffered_attachments,
             )
         )
@@ -214,6 +259,8 @@ async def start_validate_run(
     system_description: str = Form(...),
     existing_nfrs: str = Form(...),
     project_name: str = Form(""),
+    framework_pack: str = Form("core_saas"),
+    industry_profile: str = Form("saas"),
     attachments: list[UploadFile] | None = File(default=None),
 ) -> RunJobStatus:
     """Queue a validation workflow and return a pollable job id."""
@@ -233,6 +280,8 @@ async def start_validate_run(
             system_description=processed_system_description,
             existing_nfrs=processed_existing_nfrs,
             project_name=project_name.strip(),
+            framework_pack=framework_pack.strip(),
+            industry_profile=industry_profile.strip(),
         )
         initial_run.agent_states = build_agent_states("validate")
         job = create_job("validate", initial_run)
@@ -242,6 +291,8 @@ async def start_validate_run(
                 system_description=processed_system_description,
                 existing_nfrs=processed_existing_nfrs,
                 project_name=project_name.strip(),
+                framework_pack=framework_pack.strip(),
+                industry_profile=industry_profile.strip(),
                 attachments=buffered_attachments,
             )
         )
@@ -266,6 +317,8 @@ def get_run_job(job_id: str) -> RunJobStatus:
 async def generate_run(
     system_description: str = Form(...),
     project_name: str = Form(""),
+    framework_pack: str = Form("core_saas"),
+    industry_profile: str = Form("saas"),
     attachments: list[UploadFile] | None = File(default=None),
 ):
     """Run the full generate workflow."""
@@ -278,6 +331,8 @@ async def generate_run(
         return await run_generate_pipeline(
             system_description=processed_system_description,
             project_name=project_name.strip(),
+            framework_pack=framework_pack.strip(),
+            industry_profile=industry_profile.strip(),
             attachments=attachments or [],
         )
     except ValueError as exc:
@@ -291,6 +346,8 @@ async def validate_run(
     system_description: str = Form(...),
     existing_nfrs: str = Form(...),
     project_name: str = Form(""),
+    framework_pack: str = Form("core_saas"),
+    industry_profile: str = Form("saas"),
     attachments: list[UploadFile] | None = File(default=None),
 ):
     """Run the validate workflow."""
@@ -308,6 +365,8 @@ async def validate_run(
             system_description=processed_system_description,
             existing_nfrs=processed_existing_nfrs,
             project_name=project_name.strip(),
+            framework_pack=framework_pack.strip(),
+            industry_profile=industry_profile.strip(),
             attachments=attachments or [],
         )
     except ValueError as exc:

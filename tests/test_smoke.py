@@ -8,8 +8,14 @@ import pytest
 from fastapi.testclient import TestClient
 
 import backend.main
+import backend.orchestrator
 import backend.pipeline
-from agents.nfr_agent import AgentRunResult, COMPLIANCE_MAPPING_PROMPT, _sanitize_plantuml_markdown
+from agents.nfr_agent import (
+    AgentRunResult,
+    COMPLIANCE_MAPPING_PROMPT,
+    _sanitize_plantuml_markdown,
+    map_compliance,
+)
 import backend.storage
 from backend.storage import hydrate_compliance_details
 from utils.redaction import redact_text
@@ -37,6 +43,69 @@ def test_api_health() -> None:
     response = client.get("/api/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_framework_pack_endpoint_returns_named_packs() -> None:
+    client = TestClient(backend.main.app)
+    response = client.get("/api/framework-packs")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert any(item["key"] == "core_saas" for item in payload)
+    assert any(item["key"] == "ai_product" for item in payload)
+
+
+def test_industry_profile_endpoint_returns_named_profiles() -> None:
+    client = TestClient(backend.main.app)
+    response = client.get("/api/industry-profiles")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert any(item["key"] == "saas" for item in payload)
+    assert any(item["key"] == "ai_saas" for item in payload)
+
+
+def test_chroma_collections_endpoint_returns_collection_summaries(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        backend.main,
+        "list_chroma_collections",
+        lambda: [
+            {"name": "nfr_kb", "scope": "shared", "chunk_count": 12},
+            {"name": "project_kb__acme", "scope": "project", "chunk_count": 5},
+        ],
+    )
+
+    client = TestClient(backend.main.app)
+    response = client.get("/api/kb/chroma/collections")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload[0]["name"] == "nfr_kb"
+    assert payload[1]["scope"] == "project"
+
+
+def test_chroma_collection_preview_endpoint_returns_items(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        backend.main,
+        "preview_chroma_collection",
+        lambda collection_name, limit=12: {
+            "collection": collection_name,
+            "chunk_count": 2,
+            "items": [
+                {
+                    "id": "abc123",
+                    "document_preview": "Preview text",
+                    "metadata": {"source_path": "knowledge_base/projects/demo.md", "scope": "shared"},
+                }
+            ],
+        },
+    )
+
+    client = TestClient(backend.main.app)
+    response = client.get("/api/kb/chroma/collections/nfr_kb?limit=5")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["collection"] == "nfr_kb"
+    assert payload["items"][0]["metadata"]["scope"] == "shared"
 
 
 def test_kb_ingest_and_retrieve(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -205,7 +274,7 @@ Test system.
     monkeypatch.setattr(
         backend.pipeline,
         "map_compliance",
-        lambda *_: _agent("## Compliance Mapping\n- ok"),
+        lambda *_, **__: _agent("## Compliance Mapping\n- ok"),
     )
 
     client = TestClient(backend.main.app)
@@ -266,7 +335,7 @@ def test_validate_pipeline_uses_retrieved_project_context(monkeypatch: pytest.Mo
     monkeypatch.setattr(backend.pipeline, "clarify_gaps", _capture_clarify)
     monkeypatch.setattr(backend.pipeline, "validate_nfrs", _capture_validate)
     monkeypatch.setattr(backend.pipeline, "remediate_nfrs", lambda *_: _agent("## Remediation Plan\n- ok"))
-    monkeypatch.setattr(backend.pipeline, "map_compliance", lambda *_: _agent("## Compliance Mapping\n- ok"))
+    monkeypatch.setattr(backend.pipeline, "map_compliance", lambda *_, **__: _agent("## Compliance Mapping\n- ok"))
 
     run = backend.pipeline.run_validate_pipeline_sync(
         system_description="Demo system",
@@ -281,11 +350,72 @@ def test_validate_pipeline_uses_retrieved_project_context(monkeypatch: pytest.Mo
     assert run.rag_sources[0].project_type in {"project_attachment", "compliance"}
 
 
+def test_workflow_runner_updates_states_results_and_progress() -> None:
+    run = backend.pipeline.new_run(mode="generate", system_description="demo system")
+    context = backend.orchestrator.PipelineExecutionContext(
+        run=run,
+        combined_system_description="demo system",
+        analysis_system_description="demo system",
+    )
+    progress_states: list[dict[str, str]] = []
+
+    backend.orchestrator.run_workflow(
+        context,
+        [
+            backend.orchestrator.WorkflowStep("one", "Step One", lambda _context: _agent("first result")),
+            backend.orchestrator.WorkflowStep("two", "Step Two", lambda _context: _agent("second result")),
+        ],
+        emit_progress=lambda current_run: progress_states.append(dict(current_run.agent_states)),
+        record_usage=backend.pipeline.record_usage,
+    )
+
+    assert run.results["one"] == "first result"
+    assert run.results["two"] == "second result"
+    assert run.agent_states == {"one": "done", "two": "done"}
+    assert progress_states == [
+        {"one": "waiting", "two": "waiting"},
+        {"one": "running", "two": "waiting"},
+        {"one": "done", "two": "waiting"},
+        {"one": "done", "two": "running"},
+        {"one": "done", "two": "done"},
+    ]
+
+
 def test_compliance_prompt_includes_evidence_planning_sections() -> None:
     assert "Applicable, Potentially Applicable, or Not Applicable" in COMPLIANCE_MAPPING_PROMPT
     assert "## Compliance & Evidence Mapping" in COMPLIANCE_MAPPING_PROMPT
     assert "### Prioritised Evidence Plan" in COMPLIANCE_MAPPING_PROMPT
+    assert "### Evidence Crosswalks" in COMPLIANCE_MAPPING_PROMPT
     assert "### Proof Gaps" in COMPLIANCE_MAPPING_PROMPT
+    assert "What would improve confidence" in COMPLIANCE_MAPPING_PROMPT
+
+
+def test_map_compliance_includes_selected_framework_pack_and_profile(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    def _fake_call(system_prompt: str, user_prompt: str, max_tokens: int = 0) -> AgentRunResult:
+        captured["system_prompt"] = system_prompt
+        captured["user_prompt"] = user_prompt
+        captured["max_tokens"] = str(max_tokens)
+        return _agent("## Compliance Mapping\n- ok")
+
+    monkeypatch.setattr("agents.nfr_agent._call_openai", _fake_call)
+
+    map_compliance(
+        "Demo system",
+        "NFR-01 demo",
+        "supporting analysis",
+        framework_pack="ai_product",
+        industry_profile="ai_saas",
+    )
+
+    assert "## Selected Framework Pack" in captured["user_prompt"]
+    assert "Name: AI Product" in captured["user_prompt"]
+    assert "- EU AI Act" in captured["user_prompt"]
+    assert "Guidance: Bias toward AI governance" in captured["user_prompt"]
+    assert "## Selected Industry Profile" in captured["user_prompt"]
+    assert "Name: AI SaaS" in captured["user_prompt"]
+    assert "- human oversight" in captured["user_prompt"]
 
 
 def test_hydrate_compliance_details_parses_structured_sections() -> None:
@@ -296,6 +426,7 @@ def test_hydrate_compliance_details_parses_structured_sections() -> None:
 - **EU AI Act** - Applicability: `Applicable`
   - The system uses AI to support user-facing business decisions.
   - Confidence note: AI usage is explicitly described.
+  - What would improve confidence: Clear confirmation of whether the system falls into a regulated high-risk use case.
 - **PCI DSS** - Applicability: `Not Applicable`
   - Core workflows do not directly process cardholder data.
 
@@ -311,6 +442,12 @@ def test_hydrate_compliance_details_parses_structured_sections() -> None:
 |----------|--------------|-------------------|-----------------|--------------------------|
 | HIGH | Human oversight | Signed oversight procedure | Product | Before production |
 
+### Evidence Crosswalks
+
+| Evidence Artifact | Supports Frameworks | Control Themes | Usage Scope | Notes |
+|-------------------|---------------------|----------------|-------------|-------|
+| Oversight procedure and approval records | EU AI Act; ISO/IEC 42001; NIST AI RMF | Human oversight; governance | Shared across AI governance reviews | Reusable across assurance and audit activities |
+
 ### Proof Gaps
 - No defined AI literacy training artefact yet.
 - No clear owner for periodic model-provider reassessment.
@@ -321,11 +458,40 @@ def test_hydrate_compliance_details_parses_structured_sections() -> None:
     assert len(hydrated.compliance_frameworks) == 2
     assert hydrated.compliance_frameworks[0].framework == "EU AI Act"
     assert hydrated.compliance_frameworks[0].applicability == "Applicable"
+    assert hydrated.compliance_frameworks[0].confidence_improvement.startswith("Clear confirmation")
     assert len(hydrated.compliance_mappings) == 1
     assert hydrated.compliance_mappings[0].control_theme == "Human oversight"
     assert len(hydrated.evidence_plan) == 1
     assert hydrated.evidence_plan[0].suggested_owner == "Product"
+    assert len(hydrated.evidence_crosswalks) == 1
+    assert hydrated.evidence_crosswalks[0].evidence_artifact == "Oversight procedure and approval records"
     assert len(hydrated.proof_gaps) == 2
+
+
+def test_saved_run_pack_round_trip_preserves_pack_and_profile() -> None:
+    run = backend.pipeline.new_run(
+        mode="generate",
+        system_description="demo system",
+        project_name="Acme",
+        framework_pack="ai_product",
+        industry_profile="ai_saas",
+    )
+    run.results = {
+        "clarify": "## Gap Clarification Analysis\n- ok",
+        "diagram": "## System Diagram\n- ok",
+        "nfr": "## NFR Analysis\n- ok",
+        "score": "## NFR Priority Matrix\n- ok",
+        "test": "## Test Acceptance Criteria\n- ok",
+        "conflict": "## NFR Conflict & Tension Analysis\n- ok",
+        "remediate": "## NFR Remediation Plan\n- ok",
+        "compliance": "## Compliance & Evidence Mapping\n- ok",
+    }
+
+    pack = backend.storage.build_pack(run)
+    parsed = backend.storage.parse_saved_run(pack)
+
+    assert parsed["framework_pack"] == "ai_product"
+    assert parsed["industry_profile"] == "ai_saas"
 
 
 def test_redaction_masks_credential_like_values_without_labels() -> None:

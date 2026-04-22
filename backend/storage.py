@@ -10,6 +10,7 @@ from typing import Any
 from .models import (
     ComplianceFramework,
     ComplianceMappingRow,
+    EvidenceCrosswalkItem,
     EvidencePlanItem,
     RunCounts,
     RunPayload,
@@ -97,6 +98,18 @@ def build_generate_pack(run: RunPayload) -> str:
 ## Project
 {run.project_name.strip()}
 """
+    framework_pack_section = ""
+    if getattr(run, "framework_pack", "").strip():
+        framework_pack_section = f"""
+## Framework Pack
+{run.framework_pack.strip()}
+"""
+    industry_profile_section = ""
+    if getattr(run, "industry_profile", "").strip():
+        industry_profile_section = f"""
+## Industry Profile
+{run.industry_profile.strip()}
+"""
     attachment_section = ""
     if run.attachment_context.strip():
         attachment_section = f"""
@@ -121,6 +134,8 @@ def build_generate_pack(run: RunPayload) -> str:
     return f"""# NFR Pack
 Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}
 {project_section}
+{framework_pack_section}
+{industry_profile_section}
 {attachment_section}
 
 ## System Description
@@ -169,6 +184,18 @@ def build_validate_pack(run: RunPayload) -> str:
 ## Project
 {run.project_name.strip()}
 """
+    framework_pack_section = ""
+    if getattr(run, "framework_pack", "").strip():
+        framework_pack_section = f"""
+## Framework Pack
+{run.framework_pack.strip()}
+"""
+    industry_profile_section = ""
+    if getattr(run, "industry_profile", "").strip():
+        industry_profile_section = f"""
+## Industry Profile
+{run.industry_profile.strip()}
+"""
     attachment_section = ""
     if run.attachment_context.strip():
         attachment_section = f"""
@@ -184,6 +211,8 @@ def build_validate_pack(run: RunPayload) -> str:
     return f"""# NFR Validation Pack
 Generated: {datetime.now().strftime("%d %B %Y at %H:%M")}
 {project_section}
+{framework_pack_section}
+{industry_profile_section}
 {attachment_section}
 
 ## System Description
@@ -288,6 +317,8 @@ def parse_compliance_frameworks(content: str) -> list[ComplianceFramework]:
         lowered = detail.lower()
         if lowered.startswith("confidence note"):
             current.confidence_note = detail.split(":", 1)[1].strip() if ":" in detail else detail
+        elif lowered.startswith("what would improve confidence"):
+            current.confidence_improvement = detail.split(":", 1)[1].strip() if ":" in detail else detail
         elif not current.rationale:
             current.rationale = detail
         else:
@@ -314,6 +345,27 @@ def parse_evidence_plan(content: str) -> list[EvidencePlanItem]:
                 evidence_required=row.get("Evidence Required", ""),
                 suggested_owner=row.get("Suggested Owner", ""),
                 suggested_delivery_stage=row.get("Suggested Delivery Stage", ""),
+            )
+        )
+
+    return items
+
+
+def parse_evidence_crosswalks(content: str) -> list[EvidenceCrosswalkItem]:
+    """Extract evidence crosswalk rows from the compliance markdown."""
+
+    section = extract_markdown_subsection(content, "Evidence Crosswalks")
+    rows = parse_markdown_table(section)
+    items: list[EvidenceCrosswalkItem] = []
+
+    for row in rows:
+        items.append(
+            EvidenceCrosswalkItem(
+                evidence_artifact=row.get("Evidence Artifact", ""),
+                supports_frameworks=row.get("Supports Frameworks", ""),
+                control_themes=row.get("Control Themes", ""),
+                usage_scope=row.get("Usage Scope", ""),
+                notes=row.get("Notes", ""),
             )
         )
 
@@ -372,6 +424,7 @@ def hydrate_compliance_details(run: RunPayload) -> RunPayload:
     run.compliance_frameworks = parse_compliance_frameworks(compliance_content)
     run.compliance_mappings = parse_compliance_mappings(compliance_content)
     run.evidence_plan = parse_evidence_plan(compliance_content)
+    run.evidence_crosswalks = parse_evidence_crosswalks(compliance_content)
     run.proof_gaps = parse_proof_gaps(compliance_content)
     return run
 
@@ -449,6 +502,8 @@ def parse_saved_run(content: str) -> dict[str, Any]:
             for index, key in enumerate(result_keys)
         },
         "project_name": extract_header_section(header, "Project"),
+        "framework_pack": extract_header_section(header, "Framework Pack") or "core_saas",
+        "industry_profile": extract_header_section(header, "Industry Profile") or "saas",
         "attachment_context": "",
         "existing_nfrs": "",
     }
@@ -549,6 +604,8 @@ def load_saved_run(filename: str) -> tuple[Path, RunPayload]:
         system_description=parsed["system_description"],
         existing_nfrs=parsed.get("existing_nfrs", ""),
         project_name=parsed.get("project_name", ""),
+        framework_pack=parsed.get("framework_pack", "core_saas"),
+        industry_profile=parsed.get("industry_profile", "saas"),
         attachment_context=parsed.get("attachment_context", ""),
         results=parsed["results"],
         agent_states={key: "done" for key in parsed["results"].keys()},

@@ -4,6 +4,7 @@ import { MarkdownPanel } from "@/components/markdown-panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { parsePriorityRows, parseValidationInsights } from "@/lib/analysis";
 import { downloadText } from "@/lib/utils";
 import type { Mode, RunPayload } from "@/types";
 
@@ -20,12 +21,21 @@ type ComplianceInsights = {
   proofGapCount: number;
 };
 
+type StakeholderView = "architecture" | "security" | "delivery" | "executive";
+
+type StakeholderSummary = {
+  title: string;
+  description: string;
+  bullets: string[];
+  focusTabs: string[];
+};
+
 function isProjectScopedSource(source: RunPayload["rag_sources"][number]): boolean {
   return source.project_type.trim().toLowerCase() === "project_attachment";
 }
 
 function sourceScopeLabel(source: RunPayload["rag_sources"][number]): string {
-  return isProjectScopedSource(source) ? "Project-specific attachment context" : "Shared knowledge base";
+  return isProjectScopedSource(source) ? "Project-specific retrieval context" : "Other collection";
 }
 
 function formatKnowledgeBaseContent(run: RunPayload): string {
@@ -186,6 +196,93 @@ function applicabilityCardClass(applicability: string): string {
   return "border-sky-200 bg-sky-50/70";
 }
 
+function buildStakeholderSummary(args: {
+  run: RunPayload;
+  complianceStats: {
+    frameworkCount: number;
+    applicableCount: number;
+    potentialCount: number;
+    lowConfidenceCount: number;
+    mappingCount: number;
+  };
+  complianceInsights: ComplianceInsights;
+}): Record<StakeholderView, StakeholderSummary> {
+  const { run, complianceStats, complianceInsights } = args;
+  const priorityRows = run.mode === "generate" ? parsePriorityRows(run.results.score ?? "") : [];
+  const highPriorityCount = priorityRows.filter((row) => row.priority === "HIGH").length;
+  const mediumPriorityCount = priorityRows.filter((row) => row.priority === "MEDIUM").length;
+  const lowPriorityCount = priorityRows.filter((row) => row.priority === "LOW").length;
+  const conflictCount = countMarkdownBullets(run.results.conflict ?? "");
+  const testCount = countMarkdownTableRows(run.results.test ?? "");
+  const validationInsights = run.mode === "validate" ? parseValidationInsights(run.results.validate ?? "") : null;
+
+  return {
+    architecture: {
+      title: "Architecture View",
+      description: "Focus on system shape, trade-offs, and the requirements that most affect design decisions.",
+      bullets:
+        run.mode === "generate"
+          ? [
+              `${run.counts.nfr_count} NFRs generated, with ${run.counts.critical_count} marked critical and ${highPriorityCount} marked high priority.`,
+              `${conflictCount || 0} notable conflict or trade-off areas surfaced for architectural review.`,
+              run.results.diagram
+                ? "A system diagram is available to validate boundaries, integrations, and control hotspots."
+                : "No diagram output is available for this run.",
+            ]
+          : [
+              `${validationInsights?.missingCount ?? 0} likely missing requirement areas were flagged in the validation pass.`,
+              `${validationInsights?.conflictCount ?? 0} conflict or tension areas were identified in the current NFR set.`,
+              "Use this view to focus on design weaknesses before revisiting detailed controls or evidence.",
+            ],
+      focusTabs: run.mode === "generate" ? ["diagram", "nfr", "conflict"] : ["validate", "remediate"],
+    },
+    security: {
+      title: "Security & Compliance View",
+      description: "Focus on framework fit, proof gaps, and where governance conclusions still need stronger evidence.",
+      bullets: [
+        `${complianceStats.applicableCount} framework(s) are clearly applicable, with ${complianceStats.potentialCount} more depending on final scope.`,
+        `${complianceInsights.proofGapCount || 0} proof gap(s) and ${complianceStats.lowConfidenceCount} lower-confidence framework area(s) still need attention.`,
+        `${complianceInsights.evidenceRowCount || 0} concrete evidence action(s) have been identified for follow-up.`,
+      ],
+      focusTabs: ["compliance", run.mode === "generate" ? "remediate" : "validate"],
+    },
+    delivery: {
+      title: "Delivery Planning View",
+      description: "Focus on what the team needs to implement, test, prove, and sequence next.",
+      bullets:
+        run.mode === "generate"
+          ? [
+              `${run.counts.critical_count} critical, ${highPriorityCount} high, ${mediumPriorityCount} medium, and ${lowPriorityCount} low priority requirement(s) are now in view.`,
+              `${testCount || 0} structured test criteria row(s) were generated for the most important NFRs.`,
+              `${complianceInsights.evidenceRowCount || 0} evidence item(s) can be turned into tracked follow-up actions.`,
+            ]
+          : [
+              `${validationInsights?.suggestedAdditionsCount ?? 0} suggested additions and ${validationInsights?.vagueCount ?? 0} vague requirement area(s) need remediation.`,
+              `${complianceInsights.evidenceRowCount || 0} evidence item(s) are available to help turn the review into delivery actions.`,
+              "Use remediation and compliance outputs together to shape next sprint or review actions.",
+            ],
+      focusTabs: run.mode === "generate" ? ["score", "test", "compliance"] : ["validate", "remediate", "compliance"],
+    },
+    executive: {
+      title: "Executive Summary View",
+      description: "Focus on exposure, readiness, and where the programme still needs decisions or assurance.",
+      bullets:
+        run.mode === "generate"
+          ? [
+              `${run.counts.nfr_count} total NFRs were produced across the main quality and risk areas for this system.`,
+              `${run.counts.critical_count} critical requirement(s) and ${complianceStats.applicableCount} applicable framework(s) suggest the main concentration of delivery and governance effort.`,
+              `${complianceInsights.proofGapCount || 0} proof gap(s) remain, with ${complianceStats.lowConfidenceCount} area(s) needing stronger context before they can be treated as fully defensible.`,
+            ]
+          : [
+              `Validation scored ${validationInsights?.qualityScore ?? "the current pack"} with ${validationInsights?.missingCount ?? 0} missing area(s) and ${validationInsights?.vagueCount ?? 0} weakly defined requirement(s).`,
+              `${complianceStats.applicableCount} framework(s) look applicable and ${complianceInsights.proofGapCount || 0} proof gap(s) still need action.`,
+              "This view is best for quickly judging whether the current pack is ready for architecture review or governance scrutiny.",
+            ],
+      focusTabs: run.mode === "generate" ? ["nfr", "score", "compliance"] : ["validate", "compliance"],
+    },
+  };
+}
+
 function sectionGroups(mode: Mode, run: RunPayload): Section[] {
   if (mode === "generate") {
     const sections: Section[] = [
@@ -221,17 +318,16 @@ function sectionGroups(mode: Mode, run: RunPayload): Section[] {
 export function RunTabs({ run }: { run: RunPayload }) {
   const sections = useMemo(() => sectionGroups(run.mode, run), [run]);
   const [activeTab, setActiveTab] = useState(sections[0]?.key ?? "");
+  const [activeStakeholderView, setActiveStakeholderView] = useState<StakeholderView>("architecture");
   const activeSection = sections.find((item) => item.key === activeTab) ?? sections[0];
   const ragSummary = useMemo(() => {
     const sources = run.rag_sources ?? [];
     const projectScopedCount = sources.filter(isProjectScopedSource).length;
-    const sharedCount = sources.length - projectScopedCount;
     const projectIds = Array.from(new Set(sources.map((item) => item.project_id).filter(Boolean))).sort();
 
     return {
       totalCount: sources.length,
       projectScopedCount,
-      sharedCount,
       projectIds,
     };
   }, [run.rag_sources]);
@@ -272,24 +368,91 @@ export function RunTabs({ run }: { run: RunPayload }) {
   const complianceStats = useMemo(() => {
     const frameworks = run.compliance_frameworks ?? [];
     const mappings = run.compliance_mappings ?? [];
+    const crosswalks = run.evidence_crosswalks ?? [];
     const applicableCount = frameworks.filter(
       (item) => item.applicability.trim().toLowerCase() === "applicable"
     ).length;
     const potentialCount = frameworks.filter(
       (item) => item.applicability.trim().toLowerCase() === "potentially applicable"
     ).length;
+    const lowConfidenceCount = frameworks.filter(
+      (item) =>
+        Boolean(item.confidence_note?.trim()) ||
+        Boolean(item.confidence_improvement?.trim()) ||
+        item.applicability.trim().toLowerCase() === "potentially applicable"
+    ).length;
 
     return {
       frameworkCount: frameworks.length,
       applicableCount,
       potentialCount,
+      lowConfidenceCount,
       mappingCount: mappings.length,
+      crosswalkCount: crosswalks.length,
     };
-  }, [run.compliance_frameworks, run.compliance_mappings]);
+  }, [run.compliance_frameworks, run.compliance_mappings, run.evidence_crosswalks]);
+  const stakeholderSummaries = useMemo(
+    () => buildStakeholderSummary({ run, complianceStats, complianceInsights }),
+    [run, complianceStats, complianceInsights]
+  );
+  const stakeholderView = stakeholderSummaries[activeStakeholderView];
 
   return (
     <Card>
       <CardHeader className="gap-4">
+        <div className="rounded-[24px] border border-slate-200 bg-slate-50/90 px-5 py-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Stakeholder View
+              </div>
+              <div className="mt-1 text-sm text-slate-600">
+                Reframe the same run for architecture, compliance, delivery, or executive audiences.
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {([
+                ["architecture", "Architecture"],
+                ["security", "Security / Compliance"],
+                ["delivery", "Delivery"],
+                ["executive", "Executive"],
+              ] as Array<[StakeholderView, string]>).map(([key, label]) => (
+                <Button
+                  key={key}
+                  size="sm"
+                  variant={activeStakeholderView === key ? "default" : "outline"}
+                  onClick={() => setActiveStakeholderView(key)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-4 rounded-[20px] border border-white/80 bg-white/90 px-4 py-4 shadow-sm">
+            <div className="text-base font-semibold text-slate-900">{stakeholderView.title}</div>
+            <div className="mt-1 text-sm leading-6 text-slate-600">{stakeholderView.description}</div>
+            <div className="mt-3 space-y-2 text-sm leading-6 text-slate-700">
+              {stakeholderView.bullets.map((item) => (
+                <div key={item} className="rounded-[16px] bg-slate-50 px-3 py-2">
+                  {item}
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Focus Areas</span>
+              {stakeholderView.focusTabs.map((tabKey) => {
+                const section = sections.find((item) => item.key === tabKey);
+                if (!section) return null;
+
+                return (
+                  <Button key={tabKey} size="sm" variant="outline" onClick={() => setActiveTab(tabKey)}>
+                    {section.label}
+                  </Button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
         <div className="flex flex-wrap gap-2">
           {sections.map((section) => (
             <Button
@@ -311,9 +474,6 @@ export function RunTabs({ run }: { run: RunPayload }) {
               <>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold text-slate-900">Retrieved context in use</span>
-                  {ragSummary.sharedCount ? (
-                    <Badge className="bg-sky-100 text-sky-800">{ragSummary.sharedCount} shared</Badge>
-                  ) : null}
                   {ragSummary.projectScopedCount ? (
                     <Badge className="bg-emerald-100 text-emerald-800">
                       {ragSummary.projectScopedCount} project-specific
@@ -337,7 +497,7 @@ export function RunTabs({ run }: { run: RunPayload }) {
               </>
             ) : (
               <>
-                <div className="font-semibold text-slate-900">Knowledge Base</div>
+                <div className="font-semibold text-slate-900">Project Retrieval</div>
                 <div className="mt-1 text-sm text-slate-700">
                   {run.rag_status?.message
                     ? run.rag_status.message
@@ -359,7 +519,7 @@ export function RunTabs({ run }: { run: RunPayload }) {
         ) : null}
         {activeSection.key === "compliance" ? (
           <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
               <div className="rounded-[24px] border border-slate-200 bg-white px-5 py-4 shadow-sm">
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
                   Frameworks Assessed
@@ -387,6 +547,15 @@ export function RunTabs({ run }: { run: RunPayload }) {
                 </div>
                 <div className="mt-1 text-sm text-slate-700">areas that depend on final scope decisions</div>
               </div>
+              <div className="rounded-[24px] border border-orange-200 bg-orange-50/80 px-5 py-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-orange-700">
+                  Confidence Watch
+                </div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
+                  {complianceStats.lowConfidenceCount}
+                </div>
+                <div className="mt-1 text-sm text-slate-700">frameworks that need stronger context or evidence</div>
+              </div>
               <div className="rounded-[24px] border border-sky-200 bg-sky-50/80 px-5 py-4 shadow-sm">
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-700">
                   Control Mappings
@@ -395,6 +564,15 @@ export function RunTabs({ run }: { run: RunPayload }) {
                   {complianceStats.mappingCount}
                 </div>
                 <div className="mt-1 text-sm text-slate-700">structured framework-to-control links captured</div>
+              </div>
+              <div className="rounded-[24px] border border-violet-200 bg-violet-50/80 px-5 py-4 shadow-sm">
+                <div className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-700">
+                  Crosswalks
+                </div>
+                <div className="mt-2 text-3xl font-semibold tracking-tight text-slate-900">
+                  {complianceStats.crosswalkCount}
+                </div>
+                <div className="mt-1 text-sm text-slate-700">shared evidence artefacts mapped across frameworks</div>
               </div>
             </div>
 
@@ -426,6 +604,11 @@ export function RunTabs({ run }: { run: RunPayload }) {
                       {framework.confidence_note ? (
                         <div className="mt-2 text-xs leading-5 text-slate-500">
                           Confidence note: {framework.confidence_note}
+                        </div>
+                      ) : null}
+                      {framework.confidence_improvement ? (
+                        <div className="mt-2 text-xs leading-5 text-slate-600">
+                          What would improve confidence: {framework.confidence_improvement}
                         </div>
                       ) : null}
                     </div>
@@ -501,6 +684,68 @@ export function RunTabs({ run }: { run: RunPayload }) {
                           </td>
                           <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
                             {item.validation_approach || "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {(run.evidence_crosswalks ?? []).length > 0 ? (
+              <div className="rounded-[24px] border border-slate-200 bg-white px-5 py-4 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      Evidence Crosswalks
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      Shared artefacts that can satisfy several frameworks or control themes at once.
+                    </div>
+                  </div>
+                  <Badge className="bg-slate-100 text-slate-700">
+                    {run.evidence_crosswalks.length} shared artefact{run.evidence_crosswalks.length === 1 ? "" : "s"}
+                  </Badge>
+                </div>
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full min-w-[860px] border-collapse overflow-hidden rounded-[20px]">
+                    <thead className="bg-slate-100">
+                      <tr>
+                        <th className="border border-slate-200 px-3 py-2 text-left text-sm font-semibold text-slate-900">
+                          Evidence Artifact
+                        </th>
+                        <th className="border border-slate-200 px-3 py-2 text-left text-sm font-semibold text-slate-900">
+                          Supports Frameworks
+                        </th>
+                        <th className="border border-slate-200 px-3 py-2 text-left text-sm font-semibold text-slate-900">
+                          Control Themes
+                        </th>
+                        <th className="border border-slate-200 px-3 py-2 text-left text-sm font-semibold text-slate-900">
+                          Usage Scope
+                        </th>
+                        <th className="border border-slate-200 px-3 py-2 text-left text-sm font-semibold text-slate-900">
+                          Notes
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {run.evidence_crosswalks.map((item, index) => (
+                        <tr key={`${item.evidence_artifact}-${index}`} className="bg-white">
+                          <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
+                            {item.evidence_artifact || "-"}
+                          </td>
+                          <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
+                            {item.supports_frameworks || "-"}
+                          </td>
+                          <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
+                            {item.control_themes || "-"}
+                          </td>
+                          <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
+                            {item.usage_scope || "-"}
+                          </td>
+                          <td className="border border-slate-200 px-3 py-2 align-top text-sm leading-6 text-slate-800">
+                            {item.notes || "-"}
                           </td>
                         </tr>
                       ))}

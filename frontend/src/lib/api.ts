@@ -1,12 +1,14 @@
 import type {
   ChatMessage,
   FollowUpResponse,
+  IndustryProfileOption,
   RedactionPreview,
   RunJobStatus,
   RunPayload,
   SaveRunResponse,
   SavedRunDetail,
-  SavedRunSummary
+  SavedRunSummary,
+  FrameworkPackOption
 } from "@/types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -108,11 +110,15 @@ export async function refineRun(run: RunPayload, additionalContext: string) {
 export async function startGenerateRun(input: {
   systemDescription: string;
   projectName: string;
+  frameworkPack: string;
+  industryProfile: string;
   files: File[];
 }) {
   const formData = new FormData();
   formData.append("system_description", input.systemDescription);
   formData.append("project_name", input.projectName);
+  formData.append("framework_pack", input.frameworkPack);
+  formData.append("industry_profile", input.industryProfile);
   input.files.forEach((file) => formData.append("attachments", file));
   const response = await safeFetch(`${API_BASE}/api/generate/start`, {
     method: "POST",
@@ -125,12 +131,16 @@ export async function startValidateRun(input: {
   systemDescription: string;
   existingNfrs: string;
   projectName: string;
+  frameworkPack: string;
+  industryProfile: string;
   files: File[];
 }) {
   const formData = new FormData();
   formData.append("system_description", input.systemDescription);
   formData.append("existing_nfrs", input.existingNfrs);
   formData.append("project_name", input.projectName);
+  formData.append("framework_pack", input.frameworkPack);
+  formData.append("industry_profile", input.industryProfile);
   input.files.forEach((file) => formData.append("attachments", file));
   const response = await safeFetch(`${API_BASE}/api/validate/start`, {
     method: "POST",
@@ -144,9 +154,20 @@ export async function fetchRunJob(jobId: string) {
   return parseResponse<RunJobStatus>(response);
 }
 
+export async function fetchFrameworkPacks() {
+  const response = await safeFetch(`${API_BASE}/api/framework-packs`);
+  return parseResponse<FrameworkPackOption[]>(response);
+}
+
+export async function fetchIndustryProfiles() {
+  const response = await safeFetch(`${API_BASE}/api/industry-profiles`);
+  return parseResponse<IndustryProfileOption[]>(response);
+}
+
 export type KnowledgeBaseStatus = {
   indexed?: boolean;
   chunk_count?: number;
+  collection_count?: number;
   file_count?: number;
   reason?: string;
   provider?: string;
@@ -191,4 +212,32 @@ export async function uploadKnowledgeBaseFile(input: { file: File; target: "proj
 export async function fetchKnowledgeBaseFiles() {
   const response = await safeFetch(`${API_BASE}/api/kb/files`);
   return parseResponse<KnowledgeBaseFile[]>(response);
+}
+
+export type ChromaCollectionSummary = {
+  name: string;
+  scope: string;
+  chunk_count: number;
+};
+
+export type ChromaCollectionPreview = {
+  collection: string;
+  chunk_count: number;
+  items: Array<{
+    id: string;
+    document_preview: string;
+    metadata: Record<string, string | number | boolean | null>;
+  }>;
+};
+
+export async function fetchChromaCollections() {
+  const response = await safeFetch(`${API_BASE}/api/kb/chroma/collections`);
+  return parseResponse<ChromaCollectionSummary[]>(response);
+}
+
+export async function fetchChromaCollectionPreview(collectionName: string, limit = 12) {
+  const response = await safeFetch(
+    `${API_BASE}/api/kb/chroma/collections/${encodeURIComponent(collectionName)}?limit=${limit}`
+  );
+  return parseResponse<ChromaCollectionPreview>(response);
 }

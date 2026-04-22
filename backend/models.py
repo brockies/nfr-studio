@@ -78,6 +78,7 @@ class ComplianceFramework(BaseModel):
     applicability: str = ""
     rationale: str = ""
     confidence_note: str = ""
+    confidence_improvement: str = ""
 
 
 class ComplianceMappingRow(BaseModel):
@@ -100,6 +101,14 @@ class EvidencePlanItem(BaseModel):
     suggested_delivery_stage: str = ""
 
 
+class EvidenceCrosswalkItem(BaseModel):
+    evidence_artifact: str = ""
+    supports_frameworks: str = ""
+    control_themes: str = ""
+    usage_scope: str = ""
+    notes: str = ""
+
+
 class RunPayload(BaseModel):
     """Complete generate or validate run returned by the API."""
 
@@ -107,6 +116,8 @@ class RunPayload(BaseModel):
     system_description: str
     existing_nfrs: str = ""
     project_name: str = ""
+    framework_pack: str = "core_saas"
+    industry_profile: str = "saas"
     attachment_context: str = ""
     result_source: ResultSource = "fresh"
     results: dict[str, str] = Field(default_factory=dict)
@@ -120,6 +131,7 @@ class RunPayload(BaseModel):
     compliance_frameworks: list[ComplianceFramework] = Field(default_factory=list)
     compliance_mappings: list[ComplianceMappingRow] = Field(default_factory=list)
     evidence_plan: list[EvidencePlanItem] = Field(default_factory=list)
+    evidence_crosswalks: list[EvidenceCrosswalkItem] = Field(default_factory=list)
     proof_gaps: list[str] = Field(default_factory=list)
 
 

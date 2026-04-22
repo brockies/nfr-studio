@@ -9,6 +9,8 @@ from typing import Any, Callable, Sequence
 
 from fastapi import UploadFile
 
+from backend.industry_profiles import render_industry_profile_context
+from backend.orchestrator import PipelineExecutionContext, WorkflowStep, run_workflow
 from agents.nfr_agent import (
     AgentRunResult,
     MODEL_NAME,
@@ -32,32 +34,12 @@ from utils.rag_manager import (
     format_retrieved_context,
     ingest_project_documents,
     kb_status,
-    retrieve,
     retrieve_project_documents,
 )
 from utils.redaction import describe_redaction_items, redact_text, summarize_redaction
 
 from .models import ChatMessage, RagSource, RagStatus, RedactionPreview, RunPayload, UsageStat
 from .storage import hydrate_pack
-
-
-GENERATE_AGENTS: list[tuple[str, str]] = [
-    ("clarify", "Gap Clarification Agent"),
-    ("diagram", "Diagram Generation Agent"),
-    ("nfr", "NFR Generation Agent"),
-    ("score", "Scoring and Priority Agent"),
-    ("test", "Test Acceptance Criteria Agent"),
-    ("conflict", "Conflict Detection Agent"),
-    ("remediate", "Remediation Agent"),
-    ("compliance", "Compliance Mapping Agent"),
-]
-
-VALIDATE_AGENTS: list[tuple[str, str]] = [
-    ("clarify", "Gap Clarification Agent"),
-    ("validate", "NFR Validation Agent"),
-    ("remediate", "Remediation Agent"),
-    ("compliance", "Compliance Mapping Agent"),
-]
 
 ProgressCallback = Callable[[RunPayload], None]
 
@@ -271,6 +253,8 @@ def new_run(
     system_description: str,
     existing_nfrs: str = "",
     project_name: str = "",
+    framework_pack: str = "core_saas",
+    industry_profile: str = "saas",
     attachment_context: str = "",
     warnings: list[str] | None = None,
     result_source: str = "fresh",
@@ -282,24 +266,180 @@ def new_run(
         system_description=system_description,
         existing_nfrs=existing_nfrs,
         project_name=project_name,
+        framework_pack=framework_pack,
+        industry_profile=industry_profile,
         attachment_context=attachment_context,
         result_source=result_source,
         warnings=warnings or [],
     )
 
 
+def with_industry_profile_context(content: str, industry_profile: str) -> str:
+    """Append the selected industry profile bias to a prompt input."""
+
+    profile_context = render_industry_profile_context(industry_profile).strip()
+    if not profile_context:
+        return content.strip()
+    return f"{content.strip()}\n\n{profile_context}"
+
+
 def build_agent_states(mode: str) -> dict[str, str]:
     """Return the initial waiting-state map for the selected pipeline mode."""
 
     if mode == "generate":
-        return {key: "waiting" for key, _ in GENERATE_AGENTS}
-    return {key: "waiting" for key, _ in VALIDATE_AGENTS}
+        keys = ["clarify", "diagram", "nfr", "score", "test", "conflict", "remediate", "compliance"]
+    else:
+        keys = ["clarify", "validate", "remediate", "compliance"]
+    return {key: "waiting" for key in keys}
+
+
+def generate_workflow_steps() -> list[WorkflowStep]:
+    """Return the ordered generate workflow definition."""
+
+    return [
+        WorkflowStep(
+            key="clarify",
+            label="Gap Clarification Agent",
+            runner=lambda context: clarify_gaps(
+                f"{context.analysis_system_description}\n\n{context.rag_context}".strip()
+                if context.rag_context
+                else context.analysis_system_description
+            ),
+        ),
+        WorkflowStep(
+            key="diagram",
+            label="Diagram Generation Agent",
+            runner=lambda context: generate_system_diagram(
+                f"{context.analysis_system_description}\n\n{context.rag_context}".strip()
+                if context.rag_context
+                else context.analysis_system_description
+            ),
+        ),
+        WorkflowStep(
+            key="nfr",
+            label="NFR Generation Agent",
+            runner=lambda context: generate_nfrs(
+                f"""## Source System Description
+{context.analysis_system_description}
+
+## Gap Clarification Analysis
+{context.run.results["clarify"]}
+
+Use the source description as the primary input. Treat the clarification analysis as working assumptions and open questions.""",
+                retrieved_context=context.rag_context,
+            ),
+        ),
+        WorkflowStep(
+            key="score",
+            label="Scoring and Priority Agent",
+            runner=lambda context: score_nfrs(context.run.results["nfr"]),
+        ),
+        WorkflowStep(
+            key="test",
+            label="Test Acceptance Criteria Agent",
+            runner=lambda context: generate_test_criteria(
+                context.run.results["nfr"],
+                context.run.results["score"],
+            ),
+        ),
+        WorkflowStep(
+            key="conflict",
+            label="Conflict Detection Agent",
+            runner=lambda context: detect_conflicts(context.run.results["nfr"]),
+        ),
+        WorkflowStep(
+            key="remediate",
+            label="Remediation Agent",
+            runner=lambda context: remediate_nfrs(
+                context.analysis_system_description,
+                context.run.results["nfr"],
+                f"""## Gap Clarification
+{context.run.results["clarify"]}
+
+## Priority Analysis
+{context.run.results["score"]}
+
+## Conflict Analysis
+{context.run.results["conflict"]}
+""",
+            ),
+        ),
+        WorkflowStep(
+            key="compliance",
+            label="Compliance Mapping Agent",
+            runner=lambda context: map_compliance(
+                context.analysis_system_description,
+                context.run.results["nfr"],
+                f"""## Priority Analysis
+{context.run.results["score"]}
+
+## Remediation Plan
+{context.run.results["remediate"]}
+""",
+                framework_pack=context.run.framework_pack,
+                industry_profile=context.run.industry_profile,
+            ),
+        ),
+    ]
+
+
+def validate_workflow_steps() -> list[WorkflowStep]:
+    """Return the ordered validate workflow definition."""
+
+    return [
+        WorkflowStep(
+            key="clarify",
+            label="Gap Clarification Agent",
+            runner=lambda context: clarify_gaps(
+                f"{context.analysis_system_description}\n\n{context.rag_context}".strip()
+                if context.rag_context
+                else context.analysis_system_description
+            ),
+        ),
+        WorkflowStep(
+            key="validate",
+            label="NFR Validation Agent",
+            runner=lambda context: validate_nfrs(
+                f"""## Source System Description
+{context.analysis_system_description}
+
+## Gap Clarification Analysis
+{context.run.results["clarify"]}
+
+{context.rag_context}
+""",
+                context.run.existing_nfrs,
+            ),
+        ),
+        WorkflowStep(
+            key="remediate",
+            label="Remediation Agent",
+            runner=lambda context: remediate_nfrs(
+                context.analysis_system_description,
+                context.run.existing_nfrs,
+                context.run.results["validate"],
+            ),
+        ),
+        WorkflowStep(
+            key="compliance",
+            label="Compliance Mapping Agent",
+            runner=lambda context: map_compliance(
+                context.analysis_system_description,
+                context.run.existing_nfrs,
+                context.run.results["validate"],
+                framework_pack=context.run.framework_pack,
+                industry_profile=context.run.industry_profile,
+            ),
+        ),
+    ]
 
 
 def run_generate_pipeline_sync(
     *,
     system_description: str,
     project_name: str = "",
+    framework_pack: str = "core_saas",
+    industry_profile: str = "saas",
     attachments: Sequence[InMemoryUpload] | None = None,
     attachment_context: str = "",
     result_source: str = "fresh",
@@ -323,6 +463,8 @@ def run_generate_pipeline_sync(
         mode="generate",
         system_description=system_description,
         project_name=project_name,
+        framework_pack=framework_pack,
+        industry_profile=industry_profile,
         attachment_context=merged_attachment_context,
         warnings=warnings,
         result_source=result_source,
@@ -331,17 +473,21 @@ def run_generate_pipeline_sync(
         run.system_description,
         run.attachment_context,
     )
+    analysis_system_description = with_industry_profile_context(
+        combined_system_description,
+        run.industry_profile,
+    )
 
     rag_hits = []
     rag_context = ""
     provider = os.getenv("RAG_EMBEDDINGS_PROVIDER", "openai").lower()
     enabled = os.getenv("RAG_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
     kb = kb_status()
-    indexed = bool(kb.get("indexed")) and int(kb.get("chunk_count") or 0) > 0 and int(kb.get("file_count") or 0) > 0
+    indexed = bool(kb.get("indexed")) and int(kb.get("chunk_count") or 0) > 0
     run.rag_status = RagStatus(
         enabled=enabled,
         indexed=indexed,
-        file_count=int(kb.get("file_count") or 0),
+        file_count=int(kb.get("collection_count") or 0),
         chunk_count=int(kb.get("chunk_count") or 0),
         provider=str(kb.get("provider") or provider),
         message=str(kb.get("reason") or ""),
@@ -355,27 +501,14 @@ def run_generate_pipeline_sync(
                 provider=provider,
             )
 
-        shared_hits: list[RagHit] = []
         project_hits: list[RagHit] = []
 
         if not enabled:
-            run.rag_status.message = "Knowledge base retrieval is disabled (RAG_ENABLED=false)."
+            run.rag_status.message = "Project retrieval is disabled (RAG_ENABLED=false)."
         else:
-            if indexed:
-                if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-                    run.rag_status.message = "OPENAI_API_KEY is missing, so knowledge base retrieval is unavailable."
-                else:
-                    shared_hits = retrieve(combined_system_description, top_k=4)
-            else:
-                if run.rag_status.file_count == 0:
-                    run.rag_status.message = "No knowledge base files found under knowledge_base/."
-                else:
-                    run.rag_status.message = "Knowledge base not indexed yet. Ingest it via Admin: Knowledge Base or scripts/ingest_knowledge_base.py."
-
             if run.project_name.strip():
                 if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-                    if not run.rag_status.message:
-                        run.rag_status.message = "OPENAI_API_KEY is missing, so project retrieval is unavailable."
+                    run.rag_status.message = "OPENAI_API_KEY is missing, so project retrieval is unavailable."
                 else:
                     project_hits = retrieve_project_documents(
                         combined_system_description,
@@ -384,7 +517,12 @@ def run_generate_pipeline_sync(
                         provider=provider,
                     )
 
-            rag_hits = merge_rag_hits(shared_hits, project_hits, top_k=6)
+            if not run.project_name.strip():
+                run.rag_status.message = "Add a project name to keep uploaded documents isolated and retrievable."
+            elif not indexed and not project_hits:
+                run.rag_status.message = "No project-scoped retrieval context exists yet for this project."
+
+            rag_hits = merge_rag_hits(project_hits, top_k=6)
             rag_context = format_retrieved_context(rag_hits)
             run.rag_sources = [
                 RagSource(
@@ -406,114 +544,23 @@ def run_generate_pipeline_sync(
     except RagUnavailable:
         # No-op: RAG is an enhancement layer.
         rag_context = ""
-        run.rag_status.message = run.rag_status.message or "ChromaDB is not installed, so knowledge base retrieval is unavailable."
+        run.rag_status.message = run.rag_status.message or "ChromaDB is not installed, so project retrieval is unavailable."
     except Exception:
         rag_context = ""
-        run.rag_status.message = run.rag_status.message or "Knowledge base retrieval failed (continuing without it)."
+        run.rag_status.message = run.rag_status.message or "Project retrieval failed (continuing without it)."
 
-    run.agent_states = build_agent_states("generate")
     run.usage_stats.update(attachment_usage)
-    emit_progress(run, on_progress)
-
-    run.agent_states["clarify"] = "running"
-    emit_progress(run, on_progress)
-    clarify_input = combined_system_description
-    if rag_context:
-        clarify_input = f"{clarify_input}\n\n{rag_context}"
-    clarify_run = clarify_gaps(clarify_input)
-    run.results["clarify"] = clarify_run.content
-    record_usage(run.usage_stats, "clarify", "Gap Clarification Agent", clarify_run)
-    run.agent_states["clarify"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["diagram"] = "running"
-    emit_progress(run, on_progress)
-    diagram_input = combined_system_description
-    if rag_context:
-        diagram_input = f"{diagram_input}\n\n{rag_context}"
-    diagram_run = generate_system_diagram(diagram_input)
-    run.results["diagram"] = diagram_run.content
-    record_usage(run.usage_stats, "diagram", "Diagram Generation Agent", diagram_run)
-    run.agent_states["diagram"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["nfr"] = "running"
-    emit_progress(run, on_progress)
-    nfr_input = f"""## Source System Description
-{combined_system_description}
-
-## Gap Clarification Analysis
-{run.results["clarify"]}
-
-Use the source description as the primary input. Treat the clarification analysis as working assumptions and open questions."""
-    nfr_run = generate_nfrs(nfr_input, retrieved_context=rag_context)
-    run.results["nfr"] = nfr_run.content
-    record_usage(run.usage_stats, "nfr", "NFR Generation Agent", nfr_run)
-    run.agent_states["nfr"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["score"] = "running"
-    emit_progress(run, on_progress)
-    score_run = score_nfrs(run.results["nfr"])
-    run.results["score"] = score_run.content
-    record_usage(run.usage_stats, "score", "Scoring and Priority Agent", score_run)
-    run.agent_states["score"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["test"] = "running"
-    emit_progress(run, on_progress)
-    test_run = generate_test_criteria(run.results["nfr"], run.results["score"])
-    run.results["test"] = test_run.content
-    record_usage(run.usage_stats, "test", "Test Acceptance Criteria Agent", test_run)
-    run.agent_states["test"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["conflict"] = "running"
-    emit_progress(run, on_progress)
-    conflict_run = detect_conflicts(run.results["nfr"])
-    run.results["conflict"] = conflict_run.content
-    record_usage(run.usage_stats, "conflict", "Conflict Detection Agent", conflict_run)
-    run.agent_states["conflict"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["remediate"] = "running"
-    emit_progress(run, on_progress)
-    remediation_input = f"""## Gap Clarification
-{run.results["clarify"]}
-
-## Priority Analysis
-{run.results["score"]}
-
-## Conflict Analysis
-{run.results["conflict"]}
-"""
-    remediation_run = remediate_nfrs(
-        combined_system_description,
-        run.results["nfr"],
-        remediation_input,
+    run_workflow(
+        PipelineExecutionContext(
+            run=run,
+            combined_system_description=combined_system_description,
+            analysis_system_description=analysis_system_description,
+            rag_context=rag_context,
+        ),
+        generate_workflow_steps(),
+        emit_progress=on_progress,
+        record_usage=record_usage,
     )
-    run.results["remediate"] = remediation_run.content
-    record_usage(run.usage_stats, "remediate", "Remediation Agent", remediation_run)
-    run.agent_states["remediate"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["compliance"] = "running"
-    emit_progress(run, on_progress)
-    compliance_input = f"""## Priority Analysis
-{run.results["score"]}
-
-## Remediation Plan
-{run.results["remediate"]}
-"""
-    compliance_run = map_compliance(
-        combined_system_description,
-        run.results["nfr"],
-        compliance_input,
-    )
-    run.results["compliance"] = compliance_run.content
-    record_usage(run.usage_stats, "compliance", "Compliance Mapping Agent", compliance_run)
-    run.agent_states["compliance"] = "done"
-    emit_progress(run, on_progress)
 
     return hydrate_pack(run)
 
@@ -523,6 +570,8 @@ def run_validate_pipeline_sync(
     system_description: str,
     existing_nfrs: str,
     project_name: str = "",
+    framework_pack: str = "core_saas",
+    industry_profile: str = "saas",
     attachments: Sequence[InMemoryUpload] | None = None,
     attachment_context: str = "",
     result_source: str = "fresh",
@@ -547,6 +596,8 @@ def run_validate_pipeline_sync(
         system_description=system_description,
         existing_nfrs=existing_nfrs,
         project_name=project_name,
+        framework_pack=framework_pack,
+        industry_profile=industry_profile,
         attachment_context=merged_attachment_context,
         warnings=warnings,
         result_source=result_source,
@@ -555,16 +606,20 @@ def run_validate_pipeline_sync(
         run.system_description,
         run.attachment_context,
     )
+    analysis_system_description = with_industry_profile_context(
+        combined_system_description,
+        run.industry_profile,
+    )
     rag_hits: list[RagHit] = []
     rag_context = ""
     provider = os.getenv("RAG_EMBEDDINGS_PROVIDER", "openai").lower()
     enabled = os.getenv("RAG_ENABLED", "true").lower() not in {"0", "false", "no", "off"}
     kb = kb_status()
-    indexed = bool(kb.get("indexed")) and int(kb.get("chunk_count") or 0) > 0 and int(kb.get("file_count") or 0) > 0
+    indexed = bool(kb.get("indexed")) and int(kb.get("chunk_count") or 0) > 0
     run.rag_status = RagStatus(
         enabled=enabled,
         indexed=indexed,
-        file_count=int(kb.get("file_count") or 0),
+        file_count=int(kb.get("collection_count") or 0),
         chunk_count=int(kb.get("chunk_count") or 0),
         provider=str(kb.get("provider") or provider),
         message=str(kb.get("reason") or ""),
@@ -580,27 +635,14 @@ def run_validate_pipeline_sync(
             pass
 
     try:
-        shared_hits: list[RagHit] = []
         project_hits: list[RagHit] = []
 
         if not enabled:
-            run.rag_status.message = "Knowledge base retrieval is disabled (RAG_ENABLED=false)."
+            run.rag_status.message = "Project retrieval is disabled (RAG_ENABLED=false)."
         else:
-            if indexed:
-                if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-                    run.rag_status.message = "OPENAI_API_KEY is missing, so knowledge base retrieval is unavailable."
-                else:
-                    shared_hits = retrieve(combined_system_description, top_k=4)
-            else:
-                if run.rag_status.file_count == 0:
-                    run.rag_status.message = "No knowledge base files found under knowledge_base/."
-                else:
-                    run.rag_status.message = "Knowledge base not indexed yet. Ingest it via Admin: Knowledge Base or scripts/ingest_knowledge_base.py."
-
             if run.project_name.strip():
                 if provider == "openai" and not os.getenv("OPENAI_API_KEY"):
-                    if not run.rag_status.message:
-                        run.rag_status.message = "OPENAI_API_KEY is missing, so project retrieval is unavailable."
+                    run.rag_status.message = "OPENAI_API_KEY is missing, so project retrieval is unavailable."
                 else:
                     project_hits = retrieve_project_documents(
                         combined_system_description,
@@ -609,7 +651,12 @@ def run_validate_pipeline_sync(
                         provider=provider,
                     )
 
-            rag_hits = merge_rag_hits(shared_hits, project_hits, top_k=6)
+            if not run.project_name.strip():
+                run.rag_status.message = "Add a project name to keep uploaded documents isolated and retrievable."
+            elif not indexed and not project_hits:
+                run.rag_status.message = "No project-scoped retrieval context exists yet for this project."
+
+            rag_hits = merge_rag_hits(project_hits, top_k=6)
             rag_context = format_retrieved_context(rag_hits)
             run.rag_sources = [
                 RagSource(
@@ -630,64 +677,22 @@ def run_validate_pipeline_sync(
                 run.rag_status.message = ""
     except RagUnavailable:
         rag_context = ""
-        run.rag_status.message = run.rag_status.message or "ChromaDB is not installed, so knowledge base retrieval is unavailable."
+        run.rag_status.message = run.rag_status.message or "ChromaDB is not installed, so project retrieval is unavailable."
     except Exception:
         rag_context = ""
-        run.rag_status.message = run.rag_status.message or "Knowledge base retrieval failed (continuing without it)."
-    run.agent_states = build_agent_states("validate")
+        run.rag_status.message = run.rag_status.message or "Project retrieval failed (continuing without it)."
     run.usage_stats.update(attachment_usage)
-    emit_progress(run, on_progress)
-
-    run.agent_states["clarify"] = "running"
-    emit_progress(run, on_progress)
-    clarify_input = combined_system_description
-    if rag_context:
-        clarify_input = f"{clarify_input}\n\n{rag_context}"
-    clarify_run = clarify_gaps(clarify_input)
-    run.results["clarify"] = clarify_run.content
-    record_usage(run.usage_stats, "clarify", "Gap Clarification Agent", clarify_run)
-    run.agent_states["clarify"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["validate"] = "running"
-    emit_progress(run, on_progress)
-    validation_system_context = f"""## Source System Description
-{combined_system_description}
-
-## Gap Clarification Analysis
-{run.results["clarify"]}
-
-{rag_context}
-"""
-    validation_run = validate_nfrs(validation_system_context, run.existing_nfrs)
-    run.results["validate"] = validation_run.content
-    record_usage(run.usage_stats, "validate", "NFR Validation Agent", validation_run)
-    run.agent_states["validate"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["remediate"] = "running"
-    emit_progress(run, on_progress)
-    remediation_run = remediate_nfrs(
-        combined_system_description,
-        run.existing_nfrs,
-        run.results["validate"],
+    run_workflow(
+        PipelineExecutionContext(
+            run=run,
+            combined_system_description=combined_system_description,
+            analysis_system_description=analysis_system_description,
+            rag_context=rag_context,
+        ),
+        validate_workflow_steps(),
+        emit_progress=on_progress,
+        record_usage=record_usage,
     )
-    run.results["remediate"] = remediation_run.content
-    record_usage(run.usage_stats, "remediate", "Remediation Agent", remediation_run)
-    run.agent_states["remediate"] = "done"
-    emit_progress(run, on_progress)
-
-    run.agent_states["compliance"] = "running"
-    emit_progress(run, on_progress)
-    compliance_run = map_compliance(
-        combined_system_description,
-        run.existing_nfrs,
-        run.results["validate"],
-    )
-    run.results["compliance"] = compliance_run.content
-    record_usage(run.usage_stats, "compliance", "Compliance Mapping Agent", compliance_run)
-    run.agent_states["compliance"] = "done"
-    emit_progress(run, on_progress)
 
     return hydrate_pack(run)
 
@@ -696,6 +701,8 @@ async def run_generate_pipeline(
     *,
     system_description: str,
     project_name: str = "",
+    framework_pack: str = "core_saas",
+    industry_profile: str = "saas",
     attachments: Sequence[UploadFile] | None = None,
     attachment_context: str = "",
     result_source: str = "fresh",
@@ -708,6 +715,8 @@ async def run_generate_pipeline(
         run_generate_pipeline_sync,
         system_description=system_description,
         project_name=project_name,
+        framework_pack=framework_pack,
+        industry_profile=industry_profile,
         attachments=buffered_attachments,
         attachment_context=attachment_context,
         result_source=result_source,
@@ -720,6 +729,8 @@ async def run_validate_pipeline(
     system_description: str,
     existing_nfrs: str,
     project_name: str = "",
+    framework_pack: str = "core_saas",
+    industry_profile: str = "saas",
     attachments: Sequence[UploadFile] | None = None,
     attachment_context: str = "",
     result_source: str = "fresh",
@@ -733,6 +744,8 @@ async def run_validate_pipeline(
         system_description=system_description,
         existing_nfrs=existing_nfrs,
         project_name=project_name,
+        framework_pack=framework_pack,
+        industry_profile=industry_profile,
         attachments=buffered_attachments,
         attachment_context=attachment_context,
         result_source=result_source,
@@ -766,6 +779,12 @@ def build_followup_context(run: RunPayload) -> str:
         f"## Mode\n{run.mode.title()}",
         f"## System Description\n{run.system_description}",
     ]
+    if run.project_name.strip():
+        parts.append(f"## Project\n{run.project_name}")
+    if getattr(run, "industry_profile", "").strip():
+        parts.append(f"## Industry Profile\n{run.industry_profile}")
+    if getattr(run, "framework_pack", "").strip():
+        parts.append(f"## Framework Pack\n{run.framework_pack}")
     if run.attachment_context.strip():
         parts.append(run.attachment_context.strip())
     if run.mode == "validate" and run.existing_nfrs.strip():
@@ -811,6 +830,8 @@ async def refine_run(run: RunPayload, additional_context: str) -> RunPayload:
         return await run_generate_pipeline(
             system_description=refined_description,
             project_name=run.project_name,
+            framework_pack=run.framework_pack,
+            industry_profile=run.industry_profile,
             attachment_context=run.attachment_context,
             result_source="refined",
         )
@@ -819,6 +840,8 @@ async def refine_run(run: RunPayload, additional_context: str) -> RunPayload:
         system_description=refined_description,
         existing_nfrs=run.existing_nfrs,
         project_name=run.project_name,
+        framework_pack=run.framework_pack,
+        industry_profile=run.industry_profile,
         attachment_context=run.attachment_context,
         result_source="refined",
     )

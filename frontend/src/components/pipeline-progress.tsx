@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { CheckCircle2, ChevronDown, ChevronRight, CircleDashed, LoaderCircle } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, LoaderCircle } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +24,27 @@ const VALIDATE_STEPS = [
   { key: "compliance", title: "Compliance & Evidence" }
 ];
 
+function stepStateLabel(state: string): string {
+  if (state === "done") return "Completed";
+  if (state === "running") return "Running";
+  if (state === "failed") return "Failed";
+  return "Waiting";
+}
+
+function stepBadgeClass(state: string): string {
+  if (state === "done") return "bg-emerald-100 text-emerald-700";
+  if (state === "running") return "bg-sky-100 text-sky-700";
+  if (state === "failed") return "bg-red-100 text-red-700";
+  return "bg-slate-100 text-slate-600";
+}
+
+function stepCardClass(state: string): string {
+  if (state === "done") return "border-emerald-200 bg-emerald-50/70";
+  if (state === "running") return "border-sky-200 bg-sky-50/70";
+  if (state === "failed") return "border-red-200 bg-red-50/70";
+  return "border-slate-200 bg-white/80";
+}
+
 export function PipelineProgress({
   mode,
   agentStates,
@@ -37,6 +58,7 @@ export function PipelineProgress({
   const hasRunningState = steps.some((step) => agentStates[step.key] === "running");
   const completedCount = steps.filter((step) => agentStates[step.key] === "done").length;
   const allStepsDone = completedCount === steps.length && steps.length > 0;
+  const progressPercent = steps.length > 0 ? Math.round((completedCount / steps.length) * 100) : 0;
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -94,6 +116,73 @@ export function PipelineProgress({
         </div>
       </CardHeader>
       <CardContent className="pt-0">
+        <div className="mb-5 rounded-[20px] border border-slate-200 bg-slate-50/90 px-4 py-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                Orchestrator View
+              </div>
+              <div className="mt-1 text-sm leading-6 text-slate-700">
+                Read-only workflow map showing how the orchestrator is moving through the current run.
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <div className="rounded-[16px] border border-slate-200 bg-white px-3 py-2">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Steps</div>
+                <div className="mt-1 text-xl font-semibold text-slate-900">{steps.length}</div>
+              </div>
+              <div className="rounded-[16px] border border-emerald-200 bg-emerald-50/80 px-3 py-2">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-700">Done</div>
+                <div className="mt-1 text-xl font-semibold text-slate-900">{completedCount}</div>
+              </div>
+              <div className="rounded-[16px] border border-sky-200 bg-sky-50/80 px-3 py-2">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-sky-700">Progress</div>
+                <div className="mt-1 text-xl font-semibold text-slate-900">{progressPercent}%</div>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-200">
+            <div
+              className="h-full rounded-full bg-slate-900 transition-all"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+          <div className="mt-4 overflow-x-auto pb-2">
+            <div className="flex min-w-max items-stretch gap-2">
+              {steps.map((step, index) => {
+                const state = agentStates[step.key] ?? "waiting";
+                const Icon =
+                  state === "done" ? CheckCircle2 : state === "running" ? LoaderCircle : CircleDashed;
+
+                return (
+                  <div key={step.key} className="flex items-center gap-2">
+                    <div className={`min-w-[180px] rounded-[18px] border px-4 py-3 ${stepCardClass(state)}`}>
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        Step {index + 1}
+                      </div>
+                      <div className="mt-1 text-sm font-semibold leading-5 text-slate-900">{step.title}</div>
+                      <div className="mt-3 flex items-center justify-between gap-2">
+                        <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${stepBadgeClass(state)}`}>
+                          {stepStateLabel(state)}
+                        </span>
+                        <Icon
+                          className={`h-4 w-4 shrink-0 ${
+                            state === "done"
+                              ? "text-emerald-600"
+                              : state === "running"
+                                ? "animate-spin text-sky-600"
+                                : "text-slate-500"
+                          }`}
+                        />
+                      </div>
+                    </div>
+                    {index < steps.length - 1 ? <ArrowRight className="h-4 w-4 shrink-0 text-slate-400" /> : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
         {collapsed ? (
           <div className="flex items-center justify-between rounded-[16px] border border-emerald-200 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-800">
             <span className="font-medium">
@@ -133,19 +222,9 @@ export function PipelineProgress({
 
                 <div className="flex items-center gap-2 self-start sm:self-center">
                   <span
-                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                      state === "done"
-                        ? "bg-emerald-100 text-emerald-700"
-                        : state === "running"
-                          ? "bg-sky-100 text-sky-700"
-                          : "bg-slate-100 text-slate-600"
-                    }`}
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${stepBadgeClass(state)}`}
                   >
-                    {state === "done"
-                      ? "Completed"
-                      : state === "running"
-                        ? "Running"
-                        : "Waiting"}
+                    {stepStateLabel(state)}
                   </span>
                   <Icon
                     className={`h-4 w-4 shrink-0 ${
